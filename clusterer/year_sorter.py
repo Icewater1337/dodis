@@ -6,17 +6,11 @@ from pathlib import Path
 import os
 
 # Directories
-pdf_dir = '/home/fuchs/Desktop/dodis/dodo/docs/fr/pdf'
-json_dir = '/home/fuchs/Desktop/dodis/dodo/docs/fr/json'
-txt_dir = '/home/fuchs/Desktop/dodis/dodo/docs/fr/text'
-output_dir = '/home/fuchs/Desktop/dodis/dodo/docs/fr/sorted'
+pdf_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/pdf'
+json_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/json'
+txt_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/txt'
+output_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de'
 
-
-
-def count_files_in_folder(root_dir):
-    for foldername, subfolders, filenames in os.walk(root_dir):
-        num_files = len(filenames)
-        print(f"Folder: {foldername}, Number of Files: {num_files}")
 
 
 
@@ -54,29 +48,28 @@ for pdf_file in pdf_files:
             print(f"Could not parse year {document_date} for document {pdf_file}")
             continue
         # Determine the directory for the year range
-        # start_year = (year // 5) * 5
-        # end_year = start_year + 4
-        # year_range = f"{start_year}-{end_year}"
-        year_range = str(year)
+        start_year = (year // 5) * 5
+        end_year = start_year + 4
+        year_range = f"{start_year}-{end_year}"
+        # year_range = str(year)
         output_folder_year = os.path.join(output_dir, year_range)
         output_dir_year_pdf = os.path.join(output_folder_year, 'pdf')
-        output_dir_year_txt = os.path.join(output_folder_year, 'txt')
+        # output_dir_year_txt = os.path.join(output_folder_year, 'txt')
 
         Path(output_dir_year_pdf).mkdir(parents=True, exist_ok=True)
-        Path(output_dir_year_txt).mkdir(parents=True, exist_ok=True)
+        # Path(output_dir_year_txt).mkdir(parents=True, exist_ok=True)
 
         # Move corresponding pdf and json to the new directory
 
         # os.rename(os.path.join(json_dir, json_file), os.path.join(output_dir_year_json, json_file))
-        try:
-            shutil.copy(os.path.join(txt_dir, txt_file), os.path.join(output_dir_year_txt, txt_file))
-        except FileNotFoundError:
-            print(f"Could not find file {txt_file}")
+        # try:
+        #     shutil.copy(os.path.join(txt_dir, txt_file), os.path.join(output_dir_year_txt, txt_file))
+        # except FileNotFoundError:
+        #     print(f"Could not find file {txt_file}")
         os.rename(os.path.join(pdf_dir, pdf_file), os.path.join(output_dir_year_pdf, pdf_file))
 
 
 print("Sorting complete!")
 
-# root_directory = "path_to_directory"
-# count_files_in_folder(root_directory)
+
 
