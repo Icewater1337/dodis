@@ -56,6 +56,7 @@ def choose_main_text_block(boxes, image_width, image_height):
             main_text_block = box
 
     return main_text_block
+
 def find_text_block(img):
     img = np.array(img)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -90,6 +91,7 @@ def find_text_block(img):
     plt.imshow(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
     plt.show()
     return cropped
+
 def convert_pdf_to_images(pdf_path):
     # Convert the PDF to a list of PIL images
     return convert_from_path(pdf_path)
@@ -98,60 +100,76 @@ def extract_text_from_image(image_path):
     return image_to_string(image_path)
 
 
-def extract_corresponding_transcript(ocr_text, full_transcript):
-    ocr_words = ocr_text.split()
-    num_ocr_words = len(ocr_words)
-
-    transcript_words = full_transcript.split()
-
-    # Get the buffer of words from the transcript
-    start_idx = max(0, num_ocr_words - 20)
-    end_idx = min(len(transcript_words), num_ocr_words + 20)
-    wl = transcript_words[start_idx:end_idx]
-
-    # Get the last three words from the OCR'd text
-    target_words = ocr_words[-3:]
-
-    # Find the highest match in the buffer
+def find_closest_match(target, source):
     highest_score = -1
     match_idx = -1
-    for i in range(len(wl) - 2):
-        current_score = fuzz.ratio(" ".join(target_words), " ".join(wl[i:i+3]))
+    for i in range(len(source) - len(target) + 1):
+        current_score = fuzz.ratio(" ".join(target), " ".join(source[i:i+len(target)]))
         if current_score > highest_score:
             highest_score = current_score
             match_idx = i
+    return match_idx
 
-    if match_idx == -1:
+def extract_corresponding_transcript(ocr_text, full_transcript):
+    ocr_words = ocr_text.split()
+
+    transcript_words = full_transcript.split()
+
+    # Attempt exact match for the first three words
+    start_target = ocr_words[:3]
+    start_match_idx = " ".join(transcript_words).find(" ".join(start_target))
+
+    # If exact match doesn't exist, use fuzzy match
+    if start_match_idx == -1:
+        start_match_idx = find_closest_match(start_target, transcript_words)
+
+    # Attempt exact match for the last three words
+    end_target = ocr_words[-3:]
+    end_match_idx = " ".join(transcript_words).find(" ".join(end_target))
+
+    # If exact match doesn't exist, use fuzzy match
+    if end_match_idx == -1:
+        end_match_idx = find_closest_match(end_target, transcript_words)
+
+    if start_match_idx == -1 or end_match_idx == -1:
         return None, full_transcript
 
     # Extract the corresponding text from the transcript
-    matched_text = ' '.join(transcript_words[:start_idx + match_idx + 3])
-    remaining_transcript = ' '.join(transcript_words[start_idx + match_idx + 3:])
+    matched_text = ' '.join(transcript_words)[start_match_idx:end_match_idx + len(" ".join(end_target))]
+    remaining_transcript = ' '.join(transcript_words)[end_match_idx + len(" ".join(end_target)):]
 
     return matched_text, remaining_transcript
 
-def main():
-    pdf_path = "resources/46979.pdf"
-    with open("resources/46979.txt", 'r') as f:
+def main(pdf_path,text_path,output_folder):
+    with open(text_path, 'r') as f:
         full_transcript = f.read()
 
     images = convert_pdf_to_images(pdf_path)
-
+    txt_filename = os.path.basename(text_path)
+    pdf_filename = os.path.basename(pdf_path)
     for idx, image in enumerate(images, start=1):
         image = find_text_block(image)
         ocr_text = extract_text_from_image(image)
+
         matched_text, full_transcript = extract_corresponding_transcript(ocr_text, full_transcript)
 
         if matched_text is None:
-            print(f"Couldn't match text for page {idx}.")
+            print(f"Couldn't match text for pdf  {pdf_path} page {idx}.")
             continue
 
-        with open(f"transcript_{idx:03}.txt", 'w') as f:
+        with open(f"{txt_filename}_{idx:03}.txt", 'w') as f:
             f.write(matched_text)
 
         # Optionally save the image
-        image.save(f"output_prefix-{idx:03}.png", "PNG")
+        image.save(f"{pdf_filename}_{idx:03}.png", "PNG")
 
 
 if __name__ == "__main__":
-    main()
+    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/"
+    txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/txt/"
+    output_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/split_output/"
+    for root, dirs, files in os.walk(pdf_path):
+        for name in files:
+            pdf_name = os.path.join(root, name)
+            text_name = os.path.join(txt_folder, name.replace(".pdf", ".txt"))
+            main(pdf_name,text_name,output_folder)
