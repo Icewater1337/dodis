@@ -1,11 +1,18 @@
 import os
+from pathlib import Path
+
+import cv2
 import easyocr
+import layoutparser as lp
+import numpy as np
 import pytesseract
 from PIL import ImageOps
 from fuzzywuzzy import fuzz
+from matplotlib import pyplot as plt, patches
+from numpy import argmin, argmax
 from pdf2image import convert_from_path
 from pytesseract import image_to_string, image_to_data
-import layoutparser as lp
+
 
 def layout_parser_test(img):
     model = lp.Detectron2LayoutModel(
@@ -28,9 +35,9 @@ def layout_parser_test(img):
     cropped_image = image[int(y1):int(y2), int(x1):int(x2)]
 
     # Plot the cropped image
-    plt.imshow(cropped_image)
-    plt.axis('off')  # to hide the axis values
-    plt.show()
+    # plt.imshow(cropped_image)
+    # plt.axis('off')  # to hide the axis values
+    # plt.show()
 
     # Extract text content using OCR
 
@@ -101,8 +108,13 @@ def find_matching_index_back(ocrd, transcript):
 
     return -1, -1, inexact
 def convert_pdf_to_images(pdf_path):
-    # Convert the PDF to a list of PIL images
-    return convert_from_path(pdf_path)
+    print(f"Trying to load {pdf_path}")
+    try:
+        images = convert_from_path(pdf_path)
+    except:
+        images = []
+        print(f"Could not load {pdf_path}. Skipping file")
+    return images
 
 def auto_crop(image):
     # Convert the image to grayscale
@@ -163,9 +175,6 @@ def choose_main_text_block(boxes, image_width, image_height):
 
     return main_text_block
 
-import cv2
-import numpy as np
-import matplotlib.pyplot as plt
 
 def find_text_block_2(img):
     img = np.array(img)
@@ -185,8 +194,8 @@ def find_text_block_2(img):
     valid_contours = [contour for contour in contours if cv2.contourArea(contour) > min_area]
 
     if not valid_contours:
-        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        plt.show()
+        # plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        # plt.show()
         return
 
     boxes = [cv2.boundingRect(contour) for contour in valid_contours]
@@ -201,8 +210,8 @@ def find_text_block_2(img):
     y_max = min(img.shape[0],y+h+padding)
     # cropped = img[y:y + h, x:x + w]
     cropped = img[y_min:y_max, x_min:x_max]
-    plt.imshow(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
-    plt.show()
+    # plt.imshow(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
+    # plt.show()
     return cropped
 
 def find_text_block(img):
@@ -217,9 +226,9 @@ def find_text_block(img):
 
     # Remaining image after excluding top
     # gray = gray[start_y:, :]
-    plt.imshow(cv2.cvtColor(gray, cv2.COLOR_BGR2RGB))
-    plt.title("Image after Excluding Top Part")
-    plt.show()
+    # plt.imshow(cv2.cvtColor(gray, cv2.COLOR_BGR2RGB))
+    # plt.title("Image after Excluding Top Part")
+    # plt.show()
 
     gray_cropped = gray[start_y:, :]
     # Adaptive Thresholding
@@ -237,8 +246,8 @@ def find_text_block(img):
     valid_contours = [contour for contour in contours if cv2.contourArea(contour) > min_area]
 
     if not valid_contours:
-        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        plt.show()
+        # plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        # plt.show()
         return
 
     boxes = [cv2.boundingRect(contour) for contour in valid_contours]
@@ -247,16 +256,16 @@ def find_text_block(img):
     main_text_block = choose_main_text_block(merged_boxes_list, img.shape[1],
                                              img.shape[0])  # Assuming you have this function
     x, y, w, h = main_text_block
-    padding = 100
+    padding = 10
     x_min = max(0, x - padding)
     y_min = max(0, y - padding + start_y)  # Adjust the y-coordinate with the excluded portion
     x_max = min(img.shape[1], x + w + padding)
     y_max = min(img.shape[0], y + h + padding + start_y)  # Adjust the y-coordinate with the excluded portion
     cropped = img[y_min:y_max, x_min:x_max]
 
-    plt.imshow(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
-    plt.title("Cropped Text Block")
-    plt.show()
+    # plt.imshow(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
+    # plt.title("Cropped Text Block")
+    # plt.show()
 
     return cropped
 
@@ -298,6 +307,10 @@ def remove_dodis(ocr_words):
     # idx_dodis = ocr_words.index("dodis")
     # return ocr_words[:idx_dodis]
 #
+def text_alignment_match(matched_transcript, image):
+    pass
+
+
 def extract_corresponding_transcript(ocr_words, full_transcript):
     # ocr_words = ocr_text.split()
 
@@ -306,7 +319,7 @@ def extract_corresponding_transcript(ocr_words, full_transcript):
     ocr_idx, transcript_idx, inexact_start = find_matching_index_front(ocr_words, full_transcript)
 
     if ocr_idx == -1 or transcript_idx == -1:
-        return None, full_transcript
+        return None, full_transcript, True, []
 
     ocr_words = ocr_words[ocr_idx:]
     transcript_words = transcript_words[transcript_idx:]
@@ -317,12 +330,13 @@ def extract_corresponding_transcript(ocr_words, full_transcript):
     relevant_indices = list(range(ocr_idx, ocr_end_index+ocr_idx + 1))
 
     if ocr_end_index == -1 or transcript_end_idx == -1:
-        return None, full_transcript
+        return None, full_transcript, True, []
 
     # Extract the corresponding text from the transcript
     matched_text = ' '.join(transcript_words[:transcript_end_idx+1])
     remaining_transcript = ' '.join(transcript_words[transcript_end_idx+1:])
     inexact = inexact_start or inexact_end
+
     return matched_text, remaining_transcript, inexact, relevant_indices
 
 
@@ -343,9 +357,9 @@ def remove_top_part(image):
     # gray = gray[start_y:, :]
 
     img_cropped = np.array(image)[start_y:, :]
-    plt.imshow(cv2.cvtColor(img_cropped, cv2.COLOR_BGR2RGB))
-    plt.title("Image after Excluding Top Part")
-    plt.show()
+    # plt.imshow(cv2.cvtColor(img_cropped, cv2.COLOR_BGR2RGB))
+    # plt.title("Image after Excluding Top Part")
+    # plt.show()
     return img_cropped
 
 
@@ -355,23 +369,82 @@ def preprocess_image(image, is_first_page):
         image = remove_top_part(image)
     return np.array(image)
 
-def backcrop_image(image, indices_to_keep, tessdata):
-    padding = 10
-    word_boxes = []
-    for index in indices_to_keep:
-        x1,y1,x2,y2 = tessdata["left"][index],tessdata["top"][index],tessdata["left"][index]+tessdata["width"][index],tessdata["top"][index]+tessdata["height"][index]
-        word_boxes.append([x1,y1,x2,y2])
 
-    crop_x1 = max(0, min([box[0] for box in word_boxes]) - padding)
-    crop_y1 = max(0, min([box[1] for box in word_boxes]) - padding)
-    crop_x2 = min(image.shape[1], max([box[2] for box in word_boxes]) + padding)
-    crop_y2 = min(image.shape[0], max([box[3] for box in word_boxes]) + padding)
+def backcrop_image(image, indices_to_keep, tessdata, take_out_parts = False):
+    plots = True
+    # Initial boundaries of the words to keep
+    word_boxes = [(
+        tessdata["left"][index],
+        tessdata["top"][index],
+        tessdata["left"][index] + tessdata["width"][index],
+        tessdata["top"][index] + tessdata["height"][index]
+    ) for index in indices_to_keep]
 
-    cropped_image = image[crop_y1:crop_y2, crop_x1:crop_x2]
-    plt.imshow(cropped_image)
-    plt.axis('off')  # to hide the axis values
-    plt.show()
-    return cropped_image
+    heights = [(box[3] - box[1]) for box in word_boxes]
+    average_height = sum(heights) / len(heights)
+
+    word_boxes = [box for box in word_boxes if (box[3] - box[1]) <= 2 * average_height]
+
+    crop_x1 = min([box[0] for box in word_boxes])
+    idx_x1 = argmin([box[0] for box in word_boxes])
+    crop_y1 = min([box[1] for box in word_boxes])
+    idx_y1 = argmin([box[1] for box in word_boxes])
+    crop_x2 = max([box[2] for box in word_boxes])
+    idx_x2 = argmax([box[2] for box in word_boxes])
+    crop_y2 = max([box[3] for box in word_boxes])
+    idx_y2 = argmax([box[3] for box in word_boxes])
+
+    # Copy the original image for manipulation
+    masked_image = image.copy()
+
+    if take_out_parts:
+    # Black out the interfering boxes
+        for index in set(range(len(tessdata["left"]))) - set(indices_to_keep):
+            x1, y1, x2, y2 = (
+                tessdata["left"][index],
+                tessdata["top"][index],
+                tessdata["left"][index] + tessdata["width"][index],
+                tessdata["top"][index] + tessdata["height"][index]
+            )
+            if (crop_x1 < x1 < crop_x2 and crop_x1 < x2 < crop_x2) and (crop_y1 < y1 < crop_y2 and crop_y1 < y2 < crop_y2):
+                masked_image[y1:y2, x1:x2] = 255  # assuming white background, adjust accordingly
+
+    # Add padding
+    padding = 3
+    crop_x1 = 0
+    # crop_x1 = max(0, crop_x1 - padding)
+    crop_y1 = max(0, crop_y1 - padding)
+    crop_x2 = image.shape[1]
+    # crop_x2 = min(image.shape[1], crop_x2 + padding)
+    crop_y2 = min(image.shape[0], crop_y2 + padding)
+
+    # Crop the image
+    cropped_masked_image = masked_image[crop_y1:crop_y2, crop_x1:crop_x2]
+    if plots:
+        # Plot the original image with bounding boxes
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.imshow(cv2.cvtColor(masked_image, cv2.COLOR_BGR2RGB))
+        for box in word_boxes[-10:]:
+            rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor='r', facecolor='none')
+            ax.add_patch(rect)
+
+        box_max_x = word_boxes[idx_x2]
+        rect_max_x = patches.Rectangle((box_max_x[0], box_max_x[1]), box_max_x[2] - box_max_x[0], box_max_x[3] - box_max_x[1], linewidth=1, edgecolor='g', facecolor='none')
+        ax.add_patch(rect_max_x)
+
+        box_max_y = word_boxes[idx_y2]
+        rect_max_y = patches.Rectangle((box_max_y[0], box_max_y[1]), box_max_y[2] - box_max_y[0], box_max_y[3] - box_max_y[1], linewidth=1, edgecolor='g', facecolor='none')
+        ax.add_patch(rect_max_y)
+
+        plt.title("Original Image with Bounding Boxes")
+        plt.axis('off')
+        plt.show()
+        plt.imshow(cropped_masked_image)
+        plt.axis('off')
+        plt.show()
+
+    return cropped_masked_image
+
 
 def main(pdf_path,text_path,output_folder):
     with open(text_path, 'r') as f:
@@ -392,13 +465,19 @@ def main(pdf_path,text_path,output_folder):
         ocr_data = extract_data_from_image(image)
         ocr_text = ocr_data["text"]
         # ocr_text = extract_text_from_image_easyocr(image)
+        full_transcript_tmp = full_transcript
         matched_text, full_transcript, inexact, wanted_ocr_indices = extract_corresponding_transcript(ocr_text, full_transcript)
-
-        img_to_save = backcrop_image(image, wanted_ocr_indices, ocr_data)
         if matched_text is None:
             print(f"Couldn't match text for pdf  {pdf_path} page {idx}.")
             continue
+
+        img_to_save = backcrop_image(image, wanted_ocr_indices, ocr_data)
+
+        text_alignment_match(matched_text, img_to_save)
+
         output_folder_tmp = f"{output_folder}inexact/" if inexact else f"{output_folder}exact/"
+        Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
+
         with open(f"{output_folder_tmp}{txt_filename}_{idx:03}.txt", 'w') as f:
             f.write(matched_text)
 
@@ -407,11 +486,13 @@ def main(pdf_path,text_path,output_folder):
 
 
 if __name__ == "__main__":
-    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/"
-    txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/txt/"
-    output_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/split_output/"
+    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/"
+    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/pdf/"
+    txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/txt/"
+    output_folder = "/media/fuchs/d/output_dodis_it/"
     debug = True
-    single_file = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/1910-1914/pdf/43272.pdf"
+    single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/26.pdf"
+    single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/tessdata/26.txt"
     if not debug:
         for root, dirs, files in os.walk(pdf_path):
             for name in files:
@@ -420,7 +501,6 @@ if __name__ == "__main__":
                 main(pdf_name,text_name,output_folder)
     else:
         print("Debug mode")
-        pdf_name = single_file
-        name = os.path.basename(single_file)
-        text_name = os.path.join(txt_folder, name.replace(".pdf", ".txt"))
-        main(pdf_name, text_name, output_folder)
+        pdf_name = single_file_pdf
+        name = os.path.basename(single_file_pdf)
+        main(pdf_name, single_file_txt, output_folder)
