@@ -1,8 +1,8 @@
 import os
 import csv
 
-root_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de"  # replace with the actual path
-csv_file = "dodis_docs_de.csv"
+root_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it"  # replace with the actual path
+csv_file = "dodis_docs_it.csv"
 
 with open(csv_file, 'w', newline='') as file:
     writer = csv.writer(file)

@@ -27,6 +27,6 @@ def move_pdfs(src_dir, dest_dir):
 
 
 # Example usage:
-src_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/"
-dest_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/"
+src_folder = "/home/fuchs/Desktop/dodis/dodo/docs/it/sorted/"
+dest_folder = "/home/fuchs/Desktop/dodis/dodo/docs/it/pdf/"
 move_pdfs(src_folder, dest_folder)

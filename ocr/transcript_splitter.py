@@ -417,7 +417,7 @@ def preprocess_image(image, is_first_page):
 
 
 def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_parts = False):
-    plots = False
+    plots = True
     transcript_list = matched_text.split()
     if not transcript_list:
         return image, None
@@ -451,14 +451,14 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             tessdata["left"][index] + tessdata["width"][index],
             tessdata["top"][index] + tessdata["height"][index]
         )
-        if (crop_x1 < x1 < crop_x2 and crop_x1 < x2 < crop_x2) and (
-                crop_y1 < y1 < crop_y2 and crop_y1 < y2 < crop_y2):
+        if tessdata["text"][index] != "" \
+            and ((crop_y1 <= y1 <= crop_y2 and crop_y1 <= y2 <= crop_y2)):
             diff_top = abs(y1 - crop_y1)
             diff_bot = abs(crop_y2 - y2)
             if diff_top < diff_bot:
-                crop_y1 = y1
+                crop_y1 = y2
             else:
-                crop_y2 = y2
+                crop_y2 = y1
 
 
     dropped_off_indices = []
@@ -469,8 +469,7 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             tessdata["left"][index] + tessdata["width"][index],
             tessdata["top"][index] + tessdata["height"][index]
         )
-        if not (crop_x1 < x1 < crop_x2 and crop_x1 < x2 < crop_x2) or not (
-                crop_y1 < y1 < crop_y2 and crop_y1 < y2 < crop_y2):
+        if not (crop_y1 < y1 < crop_y2 and crop_y1 < y2 < crop_y2):
             dropped_off_indices.append(index)
 
     rm_from_start = 0
@@ -478,34 +477,37 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
     rm_from_end = 0
     current_diff_end = 0
     for i,idx in enumerate(dropped_off_indices):
-        del word_boxes[idx]
-        back_idx = dropped_off_indices[-(i+1)]
-        if idx == indices_to_keep[0] + current_diff_start:
+        if idx in word_boxes.keys():
+            del word_boxes[idx]
+        if idx == indices_to_keep[0] + current_diff_start and tessdata["text"][idx] != "":
             rm_from_start += 1
             current_diff_start += 1
-        elif back_idx == indices_to_keep[-1] - current_diff_end:
+
+
+    for i, back_idx in enumerate(dropped_off_indices[::-1]):
+        if back_idx in word_boxes.keys():
+            del word_boxes[back_idx]
+        if back_idx == indices_to_keep[-1] - current_diff_end and tessdata["text"][back_idx] != "":
             rm_from_end += 1
             current_diff_end += 1
 
+    indices_to_keep = list(set(indices_to_keep).difference(dropped_off_indices))
 
     for i in range(rm_from_start):
         if transcript_list:
-            del transcript_list[0]
+            if tessdata["text"][indices_to_keep[0]] != transcript_list[0] \
+                    and tessdata["text"][indices_to_keep[1]] != transcript_list[1]:
+                del transcript_list[0]
+            else:
+                print("Shouldnt happen, we dont del")
     for i in range(rm_from_end):
         if transcript_list:
-            del transcript_list[-1]
+            if tessdata["text"][indices_to_keep[-1]] != transcript_list[-1] \
+                    and tessdata["text"][indices_to_keep[-2]] != transcript_list[-2]:
+                del transcript_list[-1]
+            else:
+                print("Shouldnt happen, we dont del")
 
-    if take_out_parts:
-    # Black out the interfering boxes
-        for index in set(range(len(tessdata["left"]))) - set(indices_to_keep):
-            x1, y1, x2, y2 = (
-                tessdata["left"][index],
-                tessdata["top"][index],
-                tessdata["left"][index] + tessdata["width"][index],
-                tessdata["top"][index] + tessdata["height"][index]
-            )
-            if (crop_x1 < x1 < crop_x2 and crop_x1 < x2 < crop_x2) and (crop_y1 < y1 < crop_y2 and crop_y1 < y2 < crop_y2):
-                masked_image[y1:y2, x1:x2] = 255  # assuming white background, adjust accordingly
 
     # Add padding
     padding = 3
@@ -529,11 +531,11 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor='r', facecolor='none')
             ax.add_patch(rect)
 
-        box_max_x = word_boxes[idx_x2]
+        box_max_x = list(word_boxes.values())[idx_x2]
         rect_max_x = patches.Rectangle((box_max_x[0], box_max_x[1]), box_max_x[2] - box_max_x[0], box_max_x[3] - box_max_x[1], linewidth=1, edgecolor='g', facecolor='none')
         ax.add_patch(rect_max_x)
 
-        box_max_y = word_boxes[idx_y2]
+        box_max_y = list(word_boxes.values())[idx_y2]
         rect_max_y = patches.Rectangle((box_max_y[0], box_max_y[1]), box_max_y[2] - box_max_y[0], box_max_y[3] - box_max_y[1], linewidth=1, edgecolor='g', facecolor='none')
         ax.add_patch(rect_max_y)
 
@@ -547,9 +549,18 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
     return cropped_masked_image, " ".join(transcript_list)
 
 
-def main(pdf_path,text_path,output_folder):
+def footnotes_idx_in_main(wanted_ocr_indices_fn, wanted_ocr_indices):
+    for idx in wanted_ocr_indices_fn:
+        if idx in wanted_ocr_indices:
+            return True
+    return False
+
+
+def main(pdf_path,text_path,footnotes_text_path,output_folder):
     with open(text_path, 'r') as f:
         full_transcript = f.read()
+    with open(footnotes_text_path, 'r') as f:
+        full_footnotes_transcript = f.read()
 
     images = convert_pdf_to_images(pdf_path)
     # images = convert_from_path(pdf_path, dpi=300)
@@ -570,42 +581,61 @@ def main(pdf_path,text_path,output_folder):
         ocr_text = ocr_data["text"]
         # ocr_text = extract_text_from_image_easyocr(image)
         full_transcript_tmp = full_transcript
+        # Main etxt --------------------
         matched_text, full_transcript, inexact, wanted_ocr_indices, margin_transcript = extract_corresponding_transcript(ocr_text, full_transcript)
+        # Footnotes --------------------
+        matched_footnotes, _, inexact_fn, wanted_ocr_indices_fn, margin_transcript_fn = extract_corresponding_transcript(
+            ocr_text, full_footnotes_transcript)
+
         if matched_text is None or len(matched_text.split()) == 0:
-            print(f"Couldn't match text for pdf  {pdf_path} page {idx}.")
-            continue
+            print(f"Couldn't match main text for pdf  {pdf_path} page {idx}.")
+        else:
+            img_to_save, matched_text = backcrop_image(orig_img, wanted_ocr_indices, ocr_data, matched_text)
 
+             # text_alignment_match(margin_transcript, img_to_save)
 
-        img_to_save, matched_text = backcrop_image(orig_img, wanted_ocr_indices, ocr_data, matched_text)
+            output_folder_tmp = f"{output_folder}inexact/" if inexact else f"{output_folder}exact/"
+            Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
 
-        # text_alignment_match(margin_transcript, img_to_save)
+            with open(f"{output_folder_tmp}{txt_filename}_{idx:03}.txt", 'w') as f:
+                f.write(matched_text)
 
-        output_folder_tmp = f"{output_folder}inexact/" if inexact else f"{output_folder}exact/"
-        Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
+            # Optionally save the image
+            cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}.png", np.array(img_to_save))
 
-        with open(f"{output_folder_tmp}{txt_filename}_{idx:03}.txt", 'w') as f:
-            f.write(matched_text)
+        if matched_footnotes is None or len(matched_footnotes.split()) == 0 or footnotes_idx_in_main(wanted_ocr_indices_fn, wanted_ocr_indices):
+            print(f"Couldn't match footnotes for pdf  {pdf_path} page {idx}.")
+        else:
+            img_to_save, matched_footnotes = backcrop_image(orig_img, wanted_ocr_indices_fn, ocr_data, matched_footnotes)
+            output_folder_tmp = f"{output_folder}inexact/" if inexact_fn else f"{output_folder}exact/"
+            Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
 
-        # Optionally save the image
-        cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}.png", np.array(img_to_save))
+            with open(f"{output_folder_tmp}{txt_filename}_{idx:03}_footnotes.txt", 'w') as f:
+                f.write(matched_footnotes)
+
+            # Optionally save the image
+            cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}_footnotes.png", np.array(img_to_save))
 
 
 if __name__ == "__main__":
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/"
     pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
-    txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/txt/"
-    output_folder = "/media/fuchs/d/output_dodis_en/"
-    debug = False
-    single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/26.pdf"
-    single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/tessdata/26.txt"
+    txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
+    output_folder = "/media/fuchs/d/dataset_try_2/output_dodis_de/"
+    debug = True
+    single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/3.pdf"
+    single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/3.txt"
+    single_file_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/footnotes_3.txt"
+    #23
     if not debug:
         for root, dirs, files in os.walk(pdf_path):
             for name in files:
                 pdf_name = os.path.join(root, name)
                 text_name = os.path.join(txt_folder, name.replace(".pdf", ".txt"))
-                main(pdf_name,text_name,output_folder)
+                footnote_text_name = os.path.join(txt_folder, f"footnotes_{name}".replace(".pdf", ".txt"))
+                main(pdf_name,text_name,footnote_text_name, output_folder)
     else:
         print("Debug mode")
         pdf_name = single_file_pdf
         name = os.path.basename(single_file_pdf)
-        main(pdf_name, single_file_txt, output_folder)
+        main(pdf_name, single_file_txt,single_file_txt_fn, output_folder)
