@@ -99,7 +99,9 @@ class PDFSorter(tk.Tk):
 
         # Pop the last viewed PDF from the stack
         last_viewed_pdf = self.previous_pdfs.pop()
-
+        if "computer" in last_viewed_pdf:
+            fname = os.path.basename(last_viewed_pdf)
+            shutil.move(f"{self.handwritten_folder}/{fname}", self.source_folder)
         # Add the current_pdf back to the list (since we're going back)
         if self.current_pdf:
             self.pdf_files.insert(0, os.path.basename(self.current_pdf))

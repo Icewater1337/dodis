@@ -6,10 +6,10 @@ from pathlib import Path
 import os
 
 # Directories
-pdf_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/pdf'
+pdf_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/pdf'
 json_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/json'
-txt_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/txt'
-output_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de'
+txt_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/txt'
+output_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/year_sorted/'
 
 
 

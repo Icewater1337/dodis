@@ -4,6 +4,7 @@ from pathlib import Path
 import cv2
 import easyocr
 import layoutparser as lp
+import math
 import numpy as np
 import pytesseract
 from PIL import ImageOps
@@ -13,6 +14,37 @@ from numpy import argmin, argmax
 from pdf2image import convert_from_path
 from pytesseract import image_to_string, image_to_data
 
+def preprocess_pil_image(pil_image):
+    # Convert PIL Image to OpenCV format (grayscale)
+    image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2GRAY)
+
+    # Adaptive Thresholding
+    # image = cv2.adaptiveThreshold(image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+
+    # Noise Removal with Median Filter
+    # image = cv2.medianBlur(image, 3)
+
+    # Dilation to fill in gaps
+    kernel = np.ones((2,2), np.uint8)
+    image = cv2.dilate(image, kernel, iterations=1)
+
+    coords = np.column_stack(np.where(image > 0))
+    angle = cv2.minAreaRect(coords)[-1]
+
+    if 45 < angle <= 90:
+        angle = angle - 90
+    if not (-45 <= angle <= 45):  # The text should not be skewed more than 45 degrees.
+        angle = 0
+
+    (h, w) = image.shape
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    image = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+    # plt.imshow(image)
+    # plt.axis('off')
+    # plt.show()
+    return image
 
 def layout_parser_test(img):
     model = lp.Detectron2LayoutModel(
@@ -110,7 +142,7 @@ def find_matching_index_back(ocrd, transcript):
 def convert_pdf_to_images(pdf_path):
     print(f"Trying to load {pdf_path}")
     try:
-        images = convert_from_path(pdf_path)
+        images = convert_from_path(pdf_path, dpi=300)
     except:
         images = []
         print(f"Could not load {pdf_path}. Skipping file")
@@ -307,22 +339,35 @@ def remove_dodis(ocr_words):
     # idx_dodis = ocr_words.index("dodis")
     # return ocr_words[:idx_dodis]
 #
-def text_alignment_match(matched_transcript, image):
+def text_alignment_match(full_transcript, image):
+    '''
+    Ocr the picture again and compare the ocr with the transcript again to basically finetune and ensure that the start and end words match.
+    :param full_transcript:
+    :param image:
+    :return:
+    '''
+    image =  preprocess_pil_image(image)
+    ocr_data = extract_data_from_image(image)
+    ocr_text = ocr_data["text"]
+    # ocr_text = extract_text_from_image_easyocr(image)
+    matched_text, full_transcript, inexact, wanted_ocr_indices = extract_corresponding_transcript(ocr_text,
+                                                                                                  full_transcript)
     pass
 
 
 def extract_corresponding_transcript(ocr_words, full_transcript):
     # ocr_words = ocr_text.split()
-
+    margin_transcript = full_transcript.split()
     transcript_words = full_transcript.split()
 
     ocr_idx, transcript_idx, inexact_start = find_matching_index_front(ocr_words, full_transcript)
 
     if ocr_idx == -1 or transcript_idx == -1:
-        return None, full_transcript, True, []
+        return None, full_transcript, True, [], []
 
     ocr_words = ocr_words[ocr_idx:]
     transcript_words = transcript_words[transcript_idx:]
+    margin_transcript = transcript_words[max(0,transcript_idx-10):]
     ocr_words = remove_dodis(ocr_words)
 
     ocr_end_index, transcript_end_idx, inexact_end = find_matching_index_back(ocr_words, transcript_words)
@@ -330,14 +375,15 @@ def extract_corresponding_transcript(ocr_words, full_transcript):
     relevant_indices = list(range(ocr_idx, ocr_end_index+ocr_idx + 1))
 
     if ocr_end_index == -1 or transcript_end_idx == -1:
-        return None, full_transcript, True, []
+        return None, full_transcript, True, [], []
 
     # Extract the corresponding text from the transcript
     matched_text = ' '.join(transcript_words[:transcript_end_idx+1])
     remaining_transcript = ' '.join(transcript_words[transcript_end_idx+1:])
+    margin_transcript_text = " ".join(margin_transcript[:min(transcript_end_idx+10,len(margin_transcript))])
     inexact = inexact_start or inexact_end
 
-    return matched_text, remaining_transcript, inexact, relevant_indices
+    return matched_text, remaining_transcript, inexact, relevant_indices, margin_transcript_text
 
 
 def remove_white_border(img):
@@ -370,32 +416,84 @@ def preprocess_image(image, is_first_page):
     return np.array(image)
 
 
-def backcrop_image(image, indices_to_keep, tessdata, take_out_parts = False):
-    plots = True
-    # Initial boundaries of the words to keep
-    word_boxes = [(
+def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_parts = False):
+    plots = False
+    transcript_list = matched_text.split()
+    if not transcript_list:
+        return image, None
+    word_boxes = {index:(
         tessdata["left"][index],
         tessdata["top"][index],
         tessdata["left"][index] + tessdata["width"][index],
         tessdata["top"][index] + tessdata["height"][index]
-    ) for index in indices_to_keep]
+    ) for index in indices_to_keep}
 
-    heights = [(box[3] - box[1]) for box in word_boxes]
+    heights = [(box[3] - box[1]) for box in word_boxes.values()]
     average_height = sum(heights) / len(heights)
 
-    word_boxes = [box for box in word_boxes if (box[3] - box[1]) <= 2 * average_height]
+    word_boxes = {idx:box for idx,box in word_boxes.items() if (box[3] - box[1]) <= 1.3 * average_height}
 
-    crop_x1 = min([box[0] for box in word_boxes])
-    idx_x1 = argmin([box[0] for box in word_boxes])
-    crop_y1 = min([box[1] for box in word_boxes])
-    idx_y1 = argmin([box[1] for box in word_boxes])
-    crop_x2 = max([box[2] for box in word_boxes])
-    idx_x2 = argmax([box[2] for box in word_boxes])
-    crop_y2 = max([box[3] for box in word_boxes])
-    idx_y2 = argmax([box[3] for box in word_boxes])
+    crop_x1 = min([box[0] for box in word_boxes.values()])
+    crop_y1 = min([box[1] for box in word_boxes.values()])
+    crop_x2 = max([box[2] for box in word_boxes.values()])
+    crop_y2 = max([box[3] for box in word_boxes.values()])
 
     # Copy the original image for manipulation
     masked_image = image.copy()
+
+    # Check boxes that are still on the image and crop bot and top there, and ismply remove them. TRhen also reomve recognized words that goit cropedp off now from
+    # the final transcript.
+    # Black out the interfering boxes
+    for index in set(range(len(tessdata["left"]))) - set(indices_to_keep):
+        x1, y1, x2, y2 = (
+            tessdata["left"][index],
+            tessdata["top"][index],
+            tessdata["left"][index] + tessdata["width"][index],
+            tessdata["top"][index] + tessdata["height"][index]
+        )
+        if (crop_x1 < x1 < crop_x2 and crop_x1 < x2 < crop_x2) and (
+                crop_y1 < y1 < crop_y2 and crop_y1 < y2 < crop_y2):
+            diff_top = abs(y1 - crop_y1)
+            diff_bot = abs(crop_y2 - y2)
+            if diff_top < diff_bot:
+                crop_y1 = y1
+            else:
+                crop_y2 = y2
+
+
+    dropped_off_indices = []
+    for index in word_boxes.keys():
+        x1, y1, x2, y2 = (
+            tessdata["left"][index],
+            tessdata["top"][index],
+            tessdata["left"][index] + tessdata["width"][index],
+            tessdata["top"][index] + tessdata["height"][index]
+        )
+        if not (crop_x1 < x1 < crop_x2 and crop_x1 < x2 < crop_x2) or not (
+                crop_y1 < y1 < crop_y2 and crop_y1 < y2 < crop_y2):
+            dropped_off_indices.append(index)
+
+    rm_from_start = 0
+    current_diff_start = 0
+    rm_from_end = 0
+    current_diff_end = 0
+    for i,idx in enumerate(dropped_off_indices):
+        del word_boxes[idx]
+        back_idx = dropped_off_indices[-(i+1)]
+        if idx == indices_to_keep[0] + current_diff_start:
+            rm_from_start += 1
+            current_diff_start += 1
+        elif back_idx == indices_to_keep[-1] - current_diff_end:
+            rm_from_end += 1
+            current_diff_end += 1
+
+
+    for i in range(rm_from_start):
+        if transcript_list:
+            del transcript_list[0]
+    for i in range(rm_from_end):
+        if transcript_list:
+            del transcript_list[-1]
 
     if take_out_parts:
     # Black out the interfering boxes
@@ -413,7 +511,7 @@ def backcrop_image(image, indices_to_keep, tessdata, take_out_parts = False):
     padding = 3
     crop_x1 = 0
     # crop_x1 = max(0, crop_x1 - padding)
-    crop_y1 = max(0, crop_y1 - padding)
+    crop_y1 = max(0, crop_y1 - 2*padding)
     crop_x2 = image.shape[1]
     # crop_x2 = min(image.shape[1], crop_x2 + padding)
     crop_y2 = min(image.shape[0], crop_y2 + padding)
@@ -421,10 +519,13 @@ def backcrop_image(image, indices_to_keep, tessdata, take_out_parts = False):
     # Crop the image
     cropped_masked_image = masked_image[crop_y1:crop_y2, crop_x1:crop_x2]
     if plots:
+        idx_x2 = argmax([box[2] for box in word_boxes.values()])
+        idx_y2 = argmax([box[3] for box in word_boxes.values()])
+
         # Plot the original image with bounding boxes
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.imshow(cv2.cvtColor(masked_image, cv2.COLOR_BGR2RGB))
-        for box in word_boxes[-10:]:
+        for box in list(word_boxes.values())[-10:]:
             rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor='r', facecolor='none')
             ax.add_patch(rect)
 
@@ -443,7 +544,7 @@ def backcrop_image(image, indices_to_keep, tessdata, take_out_parts = False):
         plt.axis('off')
         plt.show()
 
-    return cropped_masked_image
+    return cropped_masked_image, " ".join(transcript_list)
 
 
 def main(pdf_path,text_path,output_folder):
@@ -458,22 +559,26 @@ def main(pdf_path,text_path,output_folder):
     pdf_filename = os.path.basename(pdf_path).replace(".pdf", "")
     for idx, image in enumerate(images, start=1):
         # image = find_text_block_2(image)
+
         is_first_page = idx == 1
         image = preprocess_image(image,is_first_page)
+        orig_img = image.copy()
+        image = preprocess_pil_image(image)
         # image = layout_parser_test(image)
         # ocr_text = extract_text_from_image(image)
         ocr_data = extract_data_from_image(image)
         ocr_text = ocr_data["text"]
         # ocr_text = extract_text_from_image_easyocr(image)
         full_transcript_tmp = full_transcript
-        matched_text, full_transcript, inexact, wanted_ocr_indices = extract_corresponding_transcript(ocr_text, full_transcript)
-        if matched_text is None:
+        matched_text, full_transcript, inexact, wanted_ocr_indices, margin_transcript = extract_corresponding_transcript(ocr_text, full_transcript)
+        if matched_text is None or len(matched_text.split()) == 0:
             print(f"Couldn't match text for pdf  {pdf_path} page {idx}.")
             continue
 
-        img_to_save = backcrop_image(image, wanted_ocr_indices, ocr_data)
 
-        text_alignment_match(matched_text, img_to_save)
+        img_to_save, matched_text = backcrop_image(orig_img, wanted_ocr_indices, ocr_data, matched_text)
+
+        # text_alignment_match(margin_transcript, img_to_save)
 
         output_folder_tmp = f"{output_folder}inexact/" if inexact else f"{output_folder}exact/"
         Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
@@ -487,10 +592,10 @@ def main(pdf_path,text_path,output_folder):
 
 if __name__ == "__main__":
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/"
-    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/pdf/"
-    txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/txt/"
-    output_folder = "/media/fuchs/d/output_dodis_it/"
-    debug = True
+    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
+    txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/txt/"
+    output_folder = "/media/fuchs/d/output_dodis_en/"
+    debug = False
     single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/26.pdf"
     single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/tessdata/26.txt"
     if not debug:
