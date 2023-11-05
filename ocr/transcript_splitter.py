@@ -414,10 +414,11 @@ def preprocess_image(image, is_first_page):
     if is_first_page:
         image = remove_top_part(image)
     return np.array(image)
-
+def are_values_close(lst, margin):
+    return max(lst) - min(lst) <= margin
 
 def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_parts = False):
-    plots = True
+    plots = False
     transcript_list = matched_text.split()
     if not transcript_list:
         return image, None
@@ -428,10 +429,23 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         tessdata["top"][index] + tessdata["height"][index]
     ) for index in indices_to_keep}
 
+    # TODO: Factor in one liner cases. Hoiw to?
+    # Mayeb check if heights of all boxes are within 5 of eachother. then its one lines
+    # if it is, alxo cut off x.  For now skip 1 liners
     heights = [(box[3] - box[1]) for box in word_boxes.values()]
+
+
     average_height = sum(heights) / len(heights)
 
     word_boxes = {idx:box for idx,box in word_boxes.items() if (box[3] - box[1]) <= 1.3 * average_height}
+    # remove boxes withe empty amtches
+    word_boxes = {idx:box for idx,box in word_boxes.items() if tessdata["text"][idx] != ""}
+
+    y_1_s = [box[1] for box in word_boxes.values()]
+
+    if are_values_close(y_1_s, 1.3 * average_height) or len(indices_to_keep)< 15 or len(transcript_list) < 15:
+        print("One liner, skip")
+        return None, None
 
     crop_x1 = min([box[0] for box in word_boxes.values()])
     crop_y1 = min([box[1] for box in word_boxes.values()])
@@ -462,6 +476,9 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
 
 
     dropped_off_indices = []
+    cntr = 0
+    # from start
+    first_word_start = ""
     for index in word_boxes.keys():
         x1, y1, x2, y2 = (
             tessdata["left"][index],
@@ -469,9 +486,43 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             tessdata["left"][index] + tessdata["width"][index],
             tessdata["top"][index] + tessdata["height"][index]
         )
-        if not (crop_y1 < y1 < crop_y2 and crop_y1 < y2 < crop_y2):
+        #if not (crop_y1 <= y1 <= crop_y2) and not crop_y1 <= y2 <= crop_y2 \
+        #        and not crop_y1 <= y1 + average_height <= crop_y2:
+        if y1 < crop_y1 - 0.2 * average_height:
             dropped_off_indices.append(index)
+            cntr = 0
+        else:
+            cntr += 1
+            if first_word_start == "":
+                first_word_start = tessdata["text"][index]
+        if cntr == 3:
+            break
+    #from end
+    cntr = 0
+    first_word_end = ""
+    for index in list(word_boxes.keys())[::-1]:
+        x1, y1, x2, y2 = (
+            tessdata["left"][index],
+            tessdata["top"][index],
+            tessdata["left"][index] + tessdata["width"][index],
+            tessdata["top"][index] + tessdata["height"][index]
+        )
+        #if not (crop_y1 <= y1 <= crop_y2) and not crop_y1 <= y2 <= crop_y2 \
+        #        and not crop_y1 <= y1 + average_height <= crop_y2:
+        if y2 > crop_y2 + 0.2 * average_height:
+            dropped_off_indices.append(index)
+            cntr = 0
+        else:
+            cntr += 1
+            if first_word_end == "":
+                first_word_end = tessdata["text"][index]
+        if cntr == 3:
+            break
 
+    dropped_off_indices = sorted(dropped_off_indices)
+    #ToDO Check margin here=? maybe we do not need to be as strict above.
+    # Keep in mind that we only want to remove boxes and words that are one whole line below (thats a certain amount of y.
+    #Amd wjat is the relation of y2 form previous line?
     rm_from_start = 0
     current_diff_start = 0
     rm_from_end = 0
@@ -479,38 +530,36 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
     for i,idx in enumerate(dropped_off_indices):
         if idx in word_boxes.keys():
             del word_boxes[idx]
-        if idx == indices_to_keep[0] + current_diff_start and tessdata["text"][idx] != "":
-            rm_from_start += 1
+        if idx == indices_to_keep[0] + current_diff_start:
             current_diff_start += 1
+            if tessdata["text"][idx] != "":
+                rm_from_start += 1
 
 
     for i, back_idx in enumerate(dropped_off_indices[::-1]):
         if back_idx in word_boxes.keys():
             del word_boxes[back_idx]
-        if back_idx == indices_to_keep[-1] - current_diff_end and tessdata["text"][back_idx] != "":
-            rm_from_end += 1
+        if back_idx == indices_to_keep[-1] - current_diff_end:
             current_diff_end += 1
+            if tessdata["text"][back_idx] != "":
+                rm_from_end += 1
 
-    indices_to_keep = list(set(indices_to_keep).difference(dropped_off_indices))
 
     for i in range(rm_from_start):
-        if transcript_list:
-            if tessdata["text"][indices_to_keep[0]] != transcript_list[0] \
-                    and tessdata["text"][indices_to_keep[1]] != transcript_list[1]:
-                del transcript_list[0]
-            else:
-                print("Shouldnt happen, we dont del")
+        if transcript_list and fuzz.ratio(first_word_start,transcript_list[0]) < 75:
+            del transcript_list[0]
+        else:
+            print("Could not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_start, transcript_list[0])
+            break
     for i in range(rm_from_end):
-        if transcript_list:
-            if tessdata["text"][indices_to_keep[-1]] != transcript_list[-1] \
-                    and tessdata["text"][indices_to_keep[-2]] != transcript_list[-2]:
-                del transcript_list[-1]
-            else:
-                print("Shouldnt happen, we dont del")
-
+        if transcript_list and fuzz.ratio(first_word_end,transcript_list[-1]) < 75:
+            del transcript_list[-1]
+        else:
+            print("Could not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_end, transcript_list[-1])
+            break
 
     # Add padding
-    padding = 3
+    padding = 2
     crop_x1 = 0
     # crop_x1 = max(0, crop_x1 - padding)
     crop_y1 = max(0, crop_y1 - 2*padding)
@@ -548,6 +597,15 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
 
     return cropped_masked_image, " ".join(transcript_list)
 
+def plot_n_boxes(image, boxes, n):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    for box in boxes[-n:]:
+        rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor='r', facecolor='none')
+        ax.add_patch(rect)
+    plt.title("Original Image with Bounding Boxes")
+    plt.axis('off')
+    plt.show()
 
 def footnotes_idx_in_main(wanted_ocr_indices_fn, wanted_ocr_indices):
     for idx in wanted_ocr_indices_fn:
@@ -582,7 +640,7 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
         # ocr_text = extract_text_from_image_easyocr(image)
         full_transcript_tmp = full_transcript
         # Main etxt --------------------
-        matched_text, full_transcript, inexact, wanted_ocr_indices, margin_transcript = extract_corresponding_transcript(ocr_text, full_transcript)
+        matched_text, full_transcript, inexact, wanted_ocr_indices, margin_transcript =  extract_corresponding_transcript(ocr_text, full_transcript)
         # Footnotes --------------------
         matched_footnotes, _, inexact_fn, wanted_ocr_indices_fn, margin_transcript_fn = extract_corresponding_transcript(
             ocr_text, full_footnotes_transcript)
@@ -597,11 +655,12 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
             output_folder_tmp = f"{output_folder}inexact/" if inexact else f"{output_folder}exact/"
             Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
 
-            with open(f"{output_folder_tmp}{txt_filename}_{idx:03}.txt", 'w') as f:
-                f.write(matched_text)
+            if img_to_save is not None:
+                with open(f"{output_folder_tmp}{txt_filename}_{idx:03}.txt", 'w') as f:
+                    f.write(matched_text)
 
-            # Optionally save the image
-            cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}.png", np.array(img_to_save))
+                # Optionally save the image
+                cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}.png", np.array(img_to_save))
 
         if matched_footnotes is None or len(matched_footnotes.split()) == 0 or footnotes_idx_in_main(wanted_ocr_indices_fn, wanted_ocr_indices):
             print(f"Couldn't match footnotes for pdf  {pdf_path} page {idx}.")
@@ -610,19 +669,20 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
             output_folder_tmp = f"{output_folder}inexact/" if inexact_fn else f"{output_folder}exact/"
             Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
 
-            with open(f"{output_folder_tmp}{txt_filename}_{idx:03}_footnotes.txt", 'w') as f:
-                f.write(matched_footnotes)
+            if img_to_save is not None:
+                with open(f"{output_folder_tmp}{txt_filename}_{idx:03}_footnotes.txt", 'w') as f:
+                    f.write(matched_footnotes)
 
-            # Optionally save the image
-            cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}_footnotes.png", np.array(img_to_save))
+                # Optionally save the image
+                cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}_footnotes.png", np.array(img_to_save))
 
 
 if __name__ == "__main__":
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/"
     pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
     txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    output_folder = "/media/fuchs/d/dataset_try_2/output_dodis_de/"
-    debug = True
+    output_folder = "/media/fuchs/d/dataset_try_2/output_dodis_en/"
+    debug = False
     single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/3.pdf"
     single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/3.txt"
     single_file_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/footnotes_3.txt"
