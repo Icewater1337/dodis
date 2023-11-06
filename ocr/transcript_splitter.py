@@ -115,15 +115,98 @@ def find_matching_index_front(ocrd_words, transcript):
         return j, index, inexact
 
     return -1, -1,inexact  # Return -1 if no match found
-def find_matching_index_back(ocrd, transcript):
-    ocrd_words = ocrd[::-1]  # Reverse the list
-    transcript_words = transcript[::-1]  # Reverse the list
-    inexact = False
-    # Look for exact match but only in the first 30 words
-    for j in range(max(30,len(ocrd_words) - 2)):
-        for i in range(len(transcript_words) - 2):
+
+def find_matching_index_back(ocrd, transcript, start_idx_ocrd, start_idx_transcript):
+    ocrd_words = ocrd[::-1]  # Split and reverse the list
+    transcript_words = transcript[::-1]  # Split and reverse the list
+    best_difference = float('inf')  # Set to positive infinity initially
+    best_match = None
+    first_match_found = False
+    # ocrd_words = [word for word in ocrd_words if word != '']
+    ocrd_words_no_empty_idx_dict = {}
+    ocrd_words_no_empty = []
+    for i in range(len(ocrd_words)):
+        if ocrd_words[i] == "":
+            ocrd_words_no_empty_idx_dict[i] = len(ocrd_words_no_empty)
+        else:
+            ocrd_words_no_empty.append(ocrd_words[i])
+            ocrd_words_no_empty_idx_dict[i] = i
+
+    for j in range(0, len(ocrd_words) - 2):
+        for i in range(0, len(transcript_words) - 2):
             if transcript_words[i:i + 3] == ocrd_words[j:j + 3]:
-                return len(ocrd_words) - j - 1, len(transcript_words) - i - 1, inexact  # Convert index back to original order
+                if not first_match_found:
+                    first_match_found = True
+                    idx_ocrd_word = len(ocrd_words) - j - 1
+                    idx_transcript_word = len(transcript_words) - i - 1
+                    length_ocrd = idx_ocrd_word - start_idx_ocrd
+                    length_transcript = idx_transcript_word - start_idx_transcript
+                    current_difference = abs(length_ocrd - length_transcript)
+
+                    first_match_details = (
+                    idx_ocrd_word, idx_transcript_word, transcript_words[i:i + 3])
+                    best_difference = current_difference
+
+
+
+                for new_j in range(j + 1, len(ocrd_words) - 2):
+                    tmp_j = new_j
+                    w1 = ocrd_words[new_j]
+                    w2 = ocrd_words[new_j + 1]
+                    while w2 == "":
+                        new_j += 1
+                        w2 = ocrd_words[new_j + 1]
+                    w3 = ocrd_words[new_j + 2]
+                    while w3 == "":
+                        new_j += 1
+                        w3 = ocrd_words[new_j + 2]
+                    ocrd_words_compare = [w1, w2, w3]
+                    if ocrd_words_compare == transcript_words[i:i + 3]:
+                        idx_ocrd_word_new = len(ocrd_words) - tmp_j - 1
+                        length_ocrd_new = idx_ocrd_word_new - start_idx_ocrd
+                        new_difference_ocrd = abs(length_ocrd_new - length_transcript)
+
+                        if new_difference_ocrd < best_difference:
+                            best_match = (
+                                len(ocrd_words) - tmp_j - 1, len(transcript_words) - i - 1, transcript_words[i:i + 3])
+                            best_difference = new_difference_ocrd
+
+                if not best_match:
+                    best_match = first_match_details
+
+                break  # Break the inner loop after the first match is found
+
+        if first_match_found:
+            # Break the outer loop once we're done searching for a better match
+            break
+
+    return best_match[0], best_match[1], False
+
+    # for j in range(0, len(ocrd_words) - 2):
+    #     for i in range(0, len(transcript_words) - 2):
+    #         if transcript_words[i:i + 3] == ocrd_words[j:j + 3]:
+    #             if not match_found:
+    #                 match_found = True
+    #                 idx_ocrd_word = len(ocrd_words) - j - 1
+    #                 idx_transcript_word = len(transcript_words) - i - 1
+    #
+    #                 best_match  = (idx_ocrd_word, idx_transcript_word, transcript_words[i:i + 3])
+    #
+    #                 for new_i in range(i + 1, len(transcript_words) - 2):
+    #                     idx_transcript_word_new = len(transcript_words) - new_i - 1
+    #                     if ocrd_words[j:j + 3] == transcript_words[idx_transcript_word_new:idx_transcript_word_new + 3]:
+    #                         # found second match, continue in outside loop
+    #                         match_found = False
+    #                         break
+    #
+    #                 if match_found:
+    #                     break  # Break the inner loop after the first match is found
+    #
+    #     if match_found:
+    #         # Break the outer loop once we're done searching for a better match
+    #         break
+    #
+    # return best_match[0], best_match[1], False
 
     print("No exact match found. Attempting fuzzy match...")
     inexact = True
@@ -370,7 +453,7 @@ def extract_corresponding_transcript(ocr_words, full_transcript):
     margin_transcript = transcript_words[max(0,transcript_idx-10):]
     ocr_words = remove_dodis(ocr_words)
 
-    ocr_end_index, transcript_end_idx, inexact_end = find_matching_index_back(ocr_words, transcript_words)
+    ocr_end_index, transcript_end_idx, inexact_end = find_matching_index_back(ocr_words, transcript_words, ocr_idx, transcript_idx)
 
     relevant_indices = list(range(ocr_idx, ocr_end_index+ocr_idx + 1))
 
@@ -437,13 +520,16 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
 
     average_height = sum(heights) / len(heights)
 
-    word_boxes = {idx:box for idx,box in word_boxes.items() if (box[3] - box[1]) <= 1.3 * average_height}
+    word_boxes = {idx:box for idx,box in word_boxes.items() if (box[3] - box[1]) <= 1.7 * average_height}
     # remove boxes withe empty amtches
     word_boxes = {idx:box for idx,box in word_boxes.items() if tessdata["text"][idx] != ""}
 
+    # remove empty indices to keep
+    indices_to_keep = [idx for idx in indices_to_keep if tessdata["text"][idx] != ""]
+
     y_1_s = [box[1] for box in word_boxes.values()]
 
-    if are_values_close(y_1_s, 1.3 * average_height) or len(indices_to_keep)< 15 or len(transcript_list) < 15:
+    if are_values_close(y_1_s, 1.3 * average_height) or len(indices_to_keep) < 15 or len(transcript_list) < 15:
         print("One liner, skip")
         return None, None
 
@@ -454,10 +540,12 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
 
     # Copy the original image for manipulation
     masked_image = image.copy()
-
+    cropi_boxi_first = None
+    cropi_boxi_last = None
     # Check boxes that are still on the image and crop bot and top there, and ismply remove them. TRhen also reomve recognized words that goit cropedp off now from
     # the final transcript.
-    # Black out the interfering boxes
+    # Somehow we need to check for "random" boxes, thta are in the middle of the image
+    # For outliers add x back in
     for index in set(range(len(tessdata["left"]))) - set(indices_to_keep):
         x1, y1, x2, y2 = (
             tessdata["left"][index],
@@ -465,14 +553,27 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             tessdata["left"][index] + tessdata["width"][index],
             tessdata["top"][index] + tessdata["height"][index]
         )
-        if tessdata["text"][index] != "" \
-            and ((crop_y1 <= y1 <= crop_y2 and crop_y1 <= y2 <= crop_y2)):
-            diff_top = abs(y1 - crop_y1)
-            diff_bot = abs(crop_y2 - y2)
-            if diff_top < diff_bot:
+        # Only check bottom of boxes for top crop and top of box for bottom crop, to prevent
+        # half words
+        if tessdata["text"][index] == "":
+            continue
+
+        if crop_x1 -10 <= x1 <= crop_x2+10 and crop_x1-10 <= x2 <= crop_x2+10:
+            if index < indices_to_keep[0] and crop_y1 <= y2 <= crop_y2:
+                # and (crop_y1 <= y1 <= crop_y2 and crop_y1 <= y2 <= crop_y2 and crop_x1 -10 <= x1 <= crop_x2+10 and crop_x1-10 <= x2 <= crop_x2+10):
+                diff_top = abs(y1 - crop_y1)
+                if diff_top > 4 * average_height:
+                    print(f"diff top seems unreasonable, skip box {index}, diff is {diff_top}")
+                    continue
                 crop_y1 = y2
-            else:
+                cropi_boxi_first = (x1,y1,x2,y2)
+            elif index > indices_to_keep[-1] and crop_y1 <= y1 <= crop_y2:
+                diff_bot = abs(crop_y2 - y2)
+                if diff_bot > 4 * average_height:
+                    print(f"diff bot seems unreasonable, skip box {index}, diff is {diff_bot}")
+                    continue
                 crop_y2 = y1
+                cropi_boxi_last = (x1,y1,x2,y2)
 
 
     dropped_off_indices = []
@@ -488,6 +589,8 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         )
         #if not (crop_y1 <= y1 <= crop_y2) and not crop_y1 <= y2 <= crop_y2 \
         #        and not crop_y1 <= y1 + average_height <= crop_y2:
+        if tessdata["text"][index] == "":
+            continue
         if y1 < crop_y1 - 0.2 * average_height:
             dropped_off_indices.append(index)
             cntr = 0
@@ -507,6 +610,8 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             tessdata["left"][index] + tessdata["width"][index],
             tessdata["top"][index] + tessdata["height"][index]
         )
+        if tessdata["text"][index] == "":
+            continue
         #if not (crop_y1 <= y1 <= crop_y2) and not crop_y1 <= y2 <= crop_y2 \
         #        and not crop_y1 <= y1 + average_height <= crop_y2:
         if y2 > crop_y2 + 0.2 * average_height:
@@ -527,22 +632,23 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
     current_diff_start = 0
     rm_from_end = 0
     current_diff_end = 0
-    for i,idx in enumerate(dropped_off_indices):
-        if idx in word_boxes.keys():
-            del word_boxes[idx]
-        if idx == indices_to_keep[0] + current_diff_start:
-            current_diff_start += 1
-            if tessdata["text"][idx] != "":
+    if dropped_off_indices[0] == indices_to_keep[0]:
+        for i,idx in enumerate(dropped_off_indices):
+            if idx in word_boxes.keys():
+                del word_boxes[idx]
+            if idx == indices_to_keep[i]:
                 rm_from_start += 1
 
-
-    for i, back_idx in enumerate(dropped_off_indices[::-1]):
-        if back_idx in word_boxes.keys():
-            del word_boxes[back_idx]
-        if back_idx == indices_to_keep[-1] - current_diff_end:
-            current_diff_end += 1
-            if tessdata["text"][back_idx] != "":
+    if dropped_off_indices[-1] == indices_to_keep[-1]:
+        for i, back_idx in enumerate(dropped_off_indices[::-1]):
+            if back_idx in word_boxes.keys():
+                del word_boxes[back_idx]
+            if back_idx == indices_to_keep[::-1][i]:
                 rm_from_end += 1
+
+
+
+
 
 
     for i in range(rm_from_start):
@@ -550,14 +656,17 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             del transcript_list[0]
         else:
             print("Could not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_start, transcript_list[0])
+            if len(transcript_list) < 15:
+                return None, None
             break
     for i in range(rm_from_end):
         if transcript_list and fuzz.ratio(first_word_end,transcript_list[-1]) < 75:
             del transcript_list[-1]
         else:
             print("Could not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_end, transcript_list[-1])
+            if len(transcript_list) < 15:
+                return None, None
             break
-
     # Add padding
     padding = 2
     crop_x1 = 0
@@ -576,17 +685,37 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         # Plot the original image with bounding boxes
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.imshow(cv2.cvtColor(masked_image, cv2.COLOR_BGR2RGB))
-        for box in list(word_boxes.values())[-10:]:
-            rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor='r', facecolor='none')
-            ax.add_patch(rect)
+        # for box in list(word_boxes.values())[-10:]:
+        #     rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor='r', facecolor='none')
+        #     ax.add_patch(rect)
 
-        box_max_x = list(word_boxes.values())[idx_x2]
-        rect_max_x = patches.Rectangle((box_max_x[0], box_max_x[1]), box_max_x[2] - box_max_x[0], box_max_x[3] - box_max_x[1], linewidth=1, edgecolor='g', facecolor='none')
-        ax.add_patch(rect_max_x)
+        # box_max_x = list(word_boxes.values())[idx_x2]
+        # rect_max_x = patches.Rectangle((box_max_x[0], box_max_x[1]), box_max_x[2] - box_max_x[0], box_max_x[3] - box_max_x[1], linewidth=1, edgecolor='g', facecolor='none')
+        # ax.add_patch(rect_max_x)
 
-        box_max_y = list(word_boxes.values())[idx_y2]
-        rect_max_y = patches.Rectangle((box_max_y[0], box_max_y[1]), box_max_y[2] - box_max_y[0], box_max_y[3] - box_max_y[1], linewidth=1, edgecolor='g', facecolor='none')
-        ax.add_patch(rect_max_y)
+        # box_max_y = list(word_boxes.values())[idx_y2]
+        # rect_max_y = patches.Rectangle((box_max_y[0], box_max_y[1]), box_max_y[2] - box_max_y[0], box_max_y[3] - box_max_y[1], linewidth=1, edgecolor='g', facecolor='none')
+        # ax.add_patch(rect_max_y)
+
+        if cropi_boxi_first is not None:
+            rect_min_y = patches.Rectangle((cropi_boxi_first[0], cropi_boxi_first[1]), cropi_boxi_first[2] - cropi_boxi_first[0]+20,
+                                           cropi_boxi_first[3] - cropi_boxi_first[1]+20, linewidth=3, edgecolor='g', facecolor='none')
+
+            ax.add_patch(rect_min_y)
+        if cropi_boxi_last is not None:
+            rect_max_y = patches.Rectangle((cropi_boxi_last[0], cropi_boxi_last[1]), cropi_boxi_last[2] - cropi_boxi_last[0]+20,
+                                           cropi_boxi_last[3] - cropi_boxi_last[1]+20, linewidth=3, edgecolor='r', facecolor='none')
+            ax.add_patch(rect_max_y)
+        # idi = 18
+        # fancy_box = (
+        # tessdata["left"][idi],
+        # tessdata["top"][idi],
+        # tessdata["left"][idi] + tessdata["width"][idi],
+        # tessdata["top"][idi] + tessdata["height"][idi]
+        # )
+        # fancy_box_rect = patches.Rectangle((fancy_box[0], fancy_box[1]), fancy_box[2] - fancy_box[0],
+        #                                fancy_box[3] - fancy_box[1], linewidth=1, edgecolor='y', facecolor='none')
+        # ax.add_patch(fancy_box_rect)
 
         plt.title("Original Image with Bounding Boxes")
         plt.axis('off')
@@ -681,12 +810,12 @@ if __name__ == "__main__":
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/"
     pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
     txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    output_folder = "/media/fuchs/d/dataset_try_2/output_dodis_en/"
-    debug = False
-    single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/3.pdf"
-    single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/3.txt"
-    single_file_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/footnotes_3.txt"
-    #23
+    output_folder = "/media/fuchs/d/dataset_try_2/output_dodis_test/"
+    debug = True
+    single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/26.pdf"
+    single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/26.txt"
+    single_file_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/footnotes_26.txt"
+    #23, 26,3, 42968
     if not debug:
         for root, dirs, files in os.walk(pdf_path):
             for name in files:

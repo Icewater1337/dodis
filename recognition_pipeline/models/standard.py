@@ -14,7 +14,17 @@ class EasyOcrModel(BaseModel):
         self.model = easyocr.Reader(languages, gpu=False)
 
     def predict(self, image):
-        return self.model.readtext(image)
+        result =  self.model.readtext(image)
+        extracted_text = ''
+
+        # Iterate over the result
+        for detection in result:
+            text = detection[1]
+            extracted_text += text + ' '
+
+        # Remove the trailing space
+        extracted_text = extracted_text.strip()
+        return extracted_text
 
 
 class TesseractModel(BaseModel):

@@ -81,7 +81,8 @@ def preprocess_image(image):
     return image
 
 if __name__ == "__main__":
-    models = ["tesseract", "easyocr"]
+    # models = ["tesseract", "easyocr"]
+    models = ["easyocr"]
     languages = ["de", "fr", "it", "en"]
     output_folder = "/media/fuchs/d/dataset_try_2/final_dataset/output/"
     img_folder = "/media/fuchs/d/dataset_try_2/final_dataset/png/"
