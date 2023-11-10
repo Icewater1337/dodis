@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -480,7 +481,7 @@ def is_three_word_match(i, transcript_list, first_words_start):
 
 
 def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_parts = False):
-    plots = True
+    plots = False
     transcript_list = matched_text.split()
     if not transcript_list:
         return image, None
@@ -693,21 +694,32 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
 
 
     for i in range(rm_from_start):
-        if transcript_list and fuzz.ratio(first_words_start[0],transcript_list[0]) < 75:
+        if not transcript_list or len(transcript_list) < 15:
+            logger.warning(f"Abort. The transcript list is empty or too short to remove from start. The transcript list is: {transcript_list}")
+            return None, None
+        word_to_be_removed = re.sub('[^a-zA-Z]+', '', transcript_list[0])
+        # first_word_start_line_start = first_words_start[0].replace("-","")
+        first_word_start_line_start = re.sub('[^a-zA-Z]+', '', first_words_start[0])
+        if word_to_be_removed.endswith(first_word_start_line_start):
+            logger.warning(f"Stopped removing, as it seems a - case: {first_word_start_line_start}, {transcript_list[0]}")
+            transcript_list[0] = first_words_start[0]
+            break
+
+        fuzz_ratio = fuzz.ratio(first_words_start[0],word_to_be_removed)
+        if fuzz_ratio >=75:
+            logger.warning(f"Did not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_words_start[0]}, {transcript_list[0]}, Ratio: {fuzz_ratio}")
+            break
+
+        if fuzz_ratio < 75:
             del transcript_list[0]
-        else:
-            if transcript_list:
-                logger.warning(f"Did not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_words_start[0]}, {transcript_list[0]}")
-                if len(transcript_list) < 15:
-                    return None, None
-                break
 
     for i in range(rm_from_end):
         if not transcript_list or len(transcript_list) < 15:
             logger.warning(f"Abort. The transcript list is empty or too short to remove from end. The transcript list is: {transcript_list}")
             return None, None
-        word_to_be_removed = transcript_list[-1]
-        first_word_end_line_end = first_words_end[0].replace("-","")
+        word_to_be_removed = re.sub('[^a-zA-Z]+', '', transcript_list[-1])
+        first_word_end_line_end = re.sub('[^a-zA-Z]+', '', first_words_end[0])
+        # first_word_end_line_end = first_words_end[0].replace("-","")
         if word_to_be_removed.startswith(first_word_end_line_end):
             logger.warning(f"Stopped removing, as it seems a - case: {first_word_end_line_end}, {transcript_list[-1]}")
             transcript_list[-1] = first_words_end[0]
@@ -813,7 +825,7 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
     for idx, image in enumerate(images, start=1):
         logger.trace(f"Processing page {idx} of {len(images)}")
         # image = find_text_block_2(image)
-        # if idx != 11:
+        # if idx != 9:
         #     continue
         is_first_page = idx == 1
         image = preprocess_image(image,is_first_page)
@@ -876,10 +888,16 @@ if __name__ == "__main__":
     # output_folder = "/media/fuchs/d/dataset_try_3/parts/de/"
     output_folder = "/media/fuchs/d/testi_output/"
     debug = True
-    single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/35754.pdf"
-    single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/35754.txt"
-    single_file_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/footnotes_35754.txt"
+    dbeug_pdf_base = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/"
+    # pdf_list = [23,26,3,42968,35754,55703,30751,45823,55703,48366,47372,54174,327000,8303,54813]
+    pdf_list = [35754]
+    debug_txt_base = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
+    debug_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
     log_file = f"{output_folder}creatino_log.txt"
+
+    debug_pdf_fnames = [f"{dbeug_pdf_base}{pdf_name}.pdf" for pdf_name in pdf_list]
+    debug_txt_fnamse = [f"{debug_txt_base}{pdf_name}.txt" for pdf_name in pdf_list]
+    debug_txt_fn_fnamse = [f"{debug_txt_fn}footnotes_{pdf_name}.txt" for pdf_name in pdf_list]
 
     log_level = "TRACE"
     log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
@@ -907,6 +925,5 @@ if __name__ == "__main__":
                 main(pdf_name,text_name,footnote_text_name, output_folder)
     else:
         print("Debug mode")
-        pdf_name = single_file_pdf
-        name = os.path.basename(single_file_pdf)
-        main(pdf_name, single_file_txt,single_file_txt_fn, output_folder)
+        for pdf_name, single_file_txt, single_file_txt_fn in zip(debug_pdf_fnames, debug_txt_fnamse, debug_txt_fn_fnamse):
+            main(pdf_name, single_file_txt,single_file_txt_fn, output_folder)
