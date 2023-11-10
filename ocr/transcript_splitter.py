@@ -122,15 +122,6 @@ def find_matching_index_back(ocrd, transcript, start_idx_ocrd, start_idx_transcr
     best_difference = float('inf')  # Set to positive infinity initially
     best_match = None
     first_match_found = False
-    # ocrd_words = [word for word in ocrd_words if word != '']
-    ocrd_words_no_empty_idx_dict = {}
-    ocrd_words_no_empty = []
-    for i in range(len(ocrd_words)):
-        if ocrd_words[i] == "":
-            ocrd_words_no_empty_idx_dict[i] = len(ocrd_words_no_empty)
-        else:
-            ocrd_words_no_empty.append(ocrd_words[i])
-            ocrd_words_no_empty_idx_dict[i] = i
 
     for j in range(0, len(ocrd_words) - 2):
         for i in range(0, len(transcript_words) - 2):
@@ -180,33 +171,11 @@ def find_matching_index_back(ocrd, transcript, start_idx_ocrd, start_idx_transcr
             # Break the outer loop once we're done searching for a better match
             break
 
-    return best_match[0], best_match[1], False
+    if best_match:
+        return best_match[0], best_match[1], False
+    else:
+        return -1, -1, False
 
-    # for j in range(0, len(ocrd_words) - 2):
-    #     for i in range(0, len(transcript_words) - 2):
-    #         if transcript_words[i:i + 3] == ocrd_words[j:j + 3]:
-    #             if not match_found:
-    #                 match_found = True
-    #                 idx_ocrd_word = len(ocrd_words) - j - 1
-    #                 idx_transcript_word = len(transcript_words) - i - 1
-    #
-    #                 best_match  = (idx_ocrd_word, idx_transcript_word, transcript_words[i:i + 3])
-    #
-    #                 for new_i in range(i + 1, len(transcript_words) - 2):
-    #                     idx_transcript_word_new = len(transcript_words) - new_i - 1
-    #                     if ocrd_words[j:j + 3] == transcript_words[idx_transcript_word_new:idx_transcript_word_new + 3]:
-    #                         # found second match, continue in outside loop
-    #                         match_found = False
-    #                         break
-    #
-    #                 if match_found:
-    #                     break  # Break the inner loop after the first match is found
-    #
-    #     if match_found:
-    #         # Break the outer loop once we're done searching for a better match
-    #         break
-    #
-    # return best_match[0], best_match[1], False
 
     print("No exact match found. Attempting fuzzy match...")
     inexact = True
@@ -457,7 +426,7 @@ def extract_corresponding_transcript(ocr_words, full_transcript):
 
     relevant_indices = list(range(ocr_idx, ocr_end_index+ocr_idx + 1))
 
-    if ocr_end_index == -1 or transcript_end_idx == -1:
+    if ocr_end_index == -1 or transcript_end_idx == -1 or len(relevant_indices) < 15 or len(transcript_words) < 15:
         return None, full_transcript, True, [], []
 
     # Extract the corresponding text from the transcript
@@ -501,7 +470,7 @@ def are_values_close(lst, margin):
     return max(lst) - min(lst) <= margin
 
 def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_parts = False):
-    plots = False
+    plots = True
     transcript_list = matched_text.split()
     if not transcript_list:
         return image, None
@@ -632,14 +601,14 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
     current_diff_start = 0
     rm_from_end = 0
     current_diff_end = 0
-    if dropped_off_indices[0] == indices_to_keep[0]:
+    if dropped_off_indices and dropped_off_indices[0] == indices_to_keep[0]:
         for i,idx in enumerate(dropped_off_indices):
             if idx in word_boxes.keys():
                 del word_boxes[idx]
             if idx == indices_to_keep[i]:
                 rm_from_start += 1
 
-    if dropped_off_indices[-1] == indices_to_keep[-1]:
+    if dropped_off_indices and dropped_off_indices[-1] == indices_to_keep[-1]:
         for i, back_idx in enumerate(dropped_off_indices[::-1]):
             if back_idx in word_boxes.keys():
                 del word_boxes[back_idx]
@@ -655,18 +624,20 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         if transcript_list and fuzz.ratio(first_word_start,transcript_list[0]) < 75:
             del transcript_list[0]
         else:
-            print("Could not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_start, transcript_list[0])
-            if len(transcript_list) < 15:
-                return None, None
-            break
+            if transcript_list:
+                print("Could not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_start, transcript_list[0])
+                if len(transcript_list) < 15:
+                    return None, None
+                break
     for i in range(rm_from_end):
         if transcript_list and fuzz.ratio(first_word_end,transcript_list[-1]) < 75:
             del transcript_list[-1]
         else:
-            print("Could not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_end, transcript_list[-1])
-            if len(transcript_list) < 15:
-                return None, None
-            break
+            if transcript_list:
+                print("Could not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_end, transcript_list[-1])
+                if len(transcript_list) < 15:
+                    return None, None
+                break
     # Add padding
     padding = 2
     crop_x1 = 0
@@ -757,7 +728,8 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
     pdf_filename = os.path.basename(pdf_path).replace(".pdf", "")
     for idx, image in enumerate(images, start=1):
         # image = find_text_block_2(image)
-
+        if idx != 12:
+            continue
         is_first_page = idx == 1
         image = preprocess_image(image,is_first_page)
         orig_img = image.copy()
@@ -807,15 +779,27 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
 
 
 if __name__ == "__main__":
-    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/"
-    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
+    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/part1/"
+    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/computer/"
     txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    output_folder = "/media/fuchs/d/dataset_try_2/output_dodis_test/"
+    # output_folder = "/media/fuchs/d/dataset_try_3/parts/de/"
+    output_folder = "/media/fuchs/d/testi_output/"
     debug = True
-    single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/26.pdf"
-    single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/26.txt"
-    single_file_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/footnotes_26.txt"
+    single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/35754.pdf"
+    single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/35754.txt"
+    single_file_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/footnotes_35754.txt"
     #23, 26,3, 42968
+    #35754_011
+    #55703_004_footnotes
+    #30751_005 footnoretsa
+    # 45823_008 footnotes
+    #55703_005_foothn
+    # 48366_004
+    #47372_001
+    #54174_003
+    #327000_001
+    #8303_001
+    #54813_008 footntoes
     if not debug:
         for root, dirs, files in os.walk(pdf_path):
             for name in files:

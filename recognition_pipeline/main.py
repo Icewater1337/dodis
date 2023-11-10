@@ -26,7 +26,8 @@ def evaluate_model(model_name, languages, output_folder, img_folder, txt_folder)
     model = model_dict[model_name](languages)
     results = []  # List to hold dictionaries with the results
     output_file_path = Path(output_folder) / f"results_{model_name}.csv"
-
+    results_df = pd.read_csv(output_file_path)
+    calculate_dataset_wer_cer(results_df)
 
     for file in Path(img_folder).iterdir():
         logger.trace(f"Start with file: {file}")
@@ -55,6 +56,7 @@ def evaluate_model(model_name, languages, output_folder, img_folder, txt_folder)
 
     # Save the DataFrame to a CSV file
     results_df.to_csv(output_file_path, index=False)
+    calculate_dataset_wer_cer(results_df)
 
     return results_df  # Optionally return the DataFrame
 
@@ -80,14 +82,35 @@ def preprocess_image(image):
 
     return image
 
+'''
+Take a given dataframe with individual CER and WER for each picture.
+Calculate the average CER and WER for the whole dataset.
+'''
+def calculate_dataset_wer_cer(dataframe):
+    dataframe = dataframe[dataframe["CER"] != np.inf]
+    dataframe = dataframe[dataframe["WER"] != np.inf]
+    filtered_cer = dataframe[dataframe["CER"] < 0.5]
+    filtered_wer = dataframe[dataframe["WER"] < 0.5]
+
+    outliers = dataframe[dataframe["CER"] > 0.8]
+
+    # filter out infinity
+    avg_cer = filtered_cer["CER"].mean()
+    avg_wer = filtered_wer["WER"].mean()
+
+    print(f"Filtered Average CER: {avg_cer} | Average WER: {avg_wer}")
+    avg_cer_unfiltered = dataframe["CER"].mean()
+    avg_wer_unfiltered = dataframe["WER"].mean()
+    print(f"Unfiltered Average CER: {avg_cer_unfiltered} | Average WER: {avg_wer_unfiltered}")
+
 if __name__ == "__main__":
-    # models = ["tesseract", "easyocr"]
-    models = ["easyocr"]
+    models = ["tesseract", "easyocr"]
+    # models = ["easyocr"]
     languages = ["de", "fr", "it", "en"]
-    output_folder = "/media/fuchs/d/dataset_try_2/final_dataset/output/"
-    img_folder = "/media/fuchs/d/dataset_try_2/final_dataset/png/"
-    txt_folder = "/media/fuchs/d/dataset_try_2/final_dataset/txt/"
-    log_file = "/media/fuchs/d/dataset_try_2/final_dataset/output/log.txt"
+    output_folder = "/media/fuchs/d/dataset_try_3/final_dataset/output/"
+    img_folder = "/media/fuchs/d/dataset_try_3/final_dataset/png/"
+    txt_folder = "/media/fuchs/d/dataset_try_3/final_dataset/txt/"
+    log_file = "/media/fuchs/d/dataset_try_3/final_dataset/output/log.txt"
 
     log_level = "TRACE"
     log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
@@ -98,3 +121,4 @@ if __name__ == "__main__":
     for model in models:
         logger.trace(f"Start with Model: {model} and languages: {languages}")
         evaluate_model(model, languages, output_folder, img_folder, txt_folder)
+        logger.success(f"Finished with Model: {model} and languages: {languages}")
