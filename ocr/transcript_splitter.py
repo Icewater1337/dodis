@@ -470,6 +470,15 @@ def preprocess_image(image, is_first_page):
 def are_values_close(lst, margin):
     return max(lst) - min(lst) <= margin
 
+
+def is_three_word_match(i, transcript_list, first_words_start):
+    for j in range(len(first_words_start)):
+        transcript_word = transcript_list[i + j]
+        if fuzz.ratio(first_words_start[j], transcript_word) < 80:
+            return False
+    return True
+
+
 def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_parts = False):
     plots = True
     transcript_list = matched_text.split()
@@ -549,7 +558,7 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
     dropped_off_indices = []
     cntr = 0
     # from start
-    first_word_start = ""
+    first_words_start = []
     for index in word_boxes.keys():
         x1, y1, x2, y2 = (
             tessdata["left"][index],
@@ -566,13 +575,18 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             cntr = 0
         else:
             cntr += 1
-            if first_word_start == "":
-                first_word_start = tessdata["text"][index]
+            if not first_words_start:
+                tmp_idi = index
+                while tmp_idi < index +3:
+                    word = tessdata["text"][tmp_idi]
+                    if word != "":
+                        first_words_start.append(word)
+                        tmp_idi += 1
         if cntr == 3:
             break
     #from end
     cntr = 0
-    first_word_end = ""
+    first_words_end = []
     for index in list(word_boxes.keys())[::-1]:
         x1, y1, x2, y2 = (
             tessdata["left"][index],
@@ -582,29 +596,47 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         )
         if tessdata["text"][index] == "":
             continue
-        #if not (crop_y1 <= y1 <= crop_y2) and not crop_y1 <= y2 <= crop_y2 \
-        #        and not crop_y1 <= y1 + average_height <= crop_y2:
         if y2 > crop_y2 + 0.2 * average_height:
             dropped_off_indices.append(index)
             cntr = 0
         else:
             cntr += 1
-            if first_word_end == "":
-                first_word_end = tessdata["text"][index]
+            if not first_words_end:
+                tmp_idi = index
+                while tmp_idi > index - 3:
+                    word = tessdata["text"][tmp_idi]
+                    if word != "":
+                        first_words_end.append(word)
+                        tmp_idi -= 1
         if cntr == 3:
             break
 
     dropped_off_indices = sorted(dropped_off_indices)
 
-
+    transcript_indices_to_rm_start = []
+    three_word_match_start = False
     # First try to reomve from start by looking at a enaxct match for the first three
     #words on the new line.
+    logger.trace(f"Attempt to remove exactly by first three words. The words are: {first_words_start}")
+    if dropped_off_indices and dropped_off_indices[0] == indices_to_keep[0]:
+        for i, word in enumerate(transcript_list):
+            if not is_three_word_match(i,transcript_list,first_words_start):
+                transcript_indices_to_rm_start.append(i)
+            else:
+                three_word_match_start = True
+                logger.success(f"Found a three word match for the first three words. The words are: {[transcript_list[i+j] for j in range(3)]}")
+                break
+
+        if three_word_match_start:
+            transcript_list = [ele for idx, ele in enumerate(transcript_list) if
+                                   idx not in transcript_indices_to_rm_start]
 
     rm_from_start = 0
     current_diff_start = 0
     rm_from_end = 0
     current_diff_end = 0
-    if dropped_off_indices and dropped_off_indices[0] == indices_to_keep[0]:
+    if not three_word_match_start and dropped_off_indices and dropped_off_indices[0] == indices_to_keep[0]:
+        logger.warning(f"No exact match for first three words on line, attmept approx")
         for i,idx in enumerate(dropped_off_indices):
             if idx in word_boxes.keys():
                 del word_boxes[idx]
@@ -622,7 +654,26 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
                         logger.warning(f"Attempt to resovle, as the combined word {combined_word} matches the ocr word {ocr_word}")
                         rm_from_start += 1
 
+    transcript_indices_to_rm_end = []
+    three_word_match_end = False
+    # First try to reomve from start by looking at a enaxct match for the first three
+    # words on the new line.
+    logger.trace(f"Attempt to remove exactly by last three words. The words are: {first_words_end}")
     if dropped_off_indices and dropped_off_indices[-1] == indices_to_keep[-1]:
+        for i, word in enumerate(transcript_list[::-1]):
+            if not is_three_word_match(i, transcript_list[::-1], first_words_end):
+                transcript_indices_to_rm_end.append(i)
+            else:
+                three_word_match_end = True
+                logger.success(
+                    f"Found a three word match for the last three words. The words are: {[transcript_list[-(i + j+1)] for j in range(3)]}")
+                break
+
+        if three_word_match_end:
+            transcript_list_rev = [ele for idx, ele in enumerate(transcript_list[::-1]) if idx not in transcript_indices_to_rm_end]
+            transcript_list = transcript_list_rev[::-1]
+    if not three_word_match_end and dropped_off_indices and dropped_off_indices[-1] == indices_to_keep[-1]:
+        logger.warning(f"No exact match for last three words on line, attmept approx")
         for i, back_idx in enumerate(dropped_off_indices[::-1]):
             if back_idx in word_boxes.keys():
                 del word_boxes[back_idx]
@@ -642,29 +693,30 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
 
 
     for i in range(rm_from_start):
-        if transcript_list and fuzz.ratio(first_word_start,transcript_list[0]) < 75:
+        if transcript_list and fuzz.ratio(first_words_start[0],transcript_list[0]) < 75:
             del transcript_list[0]
         else:
             if transcript_list:
-                logger.warning(f"Did not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_word_start}, {transcript_list[0]}")
+                logger.warning(f"Did not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_words_start[0]}, {transcript_list[0]}")
                 if len(transcript_list) < 15:
                     return None, None
                 break
+
     for i in range(rm_from_end):
         if not transcript_list or len(transcript_list) < 15:
             logger.warning(f"Abort. The transcript list is empty or too short to remove from end. The transcript list is: {transcript_list}")
             return None, None
         word_to_be_removed = transcript_list[-1]
-        first_word_end_line_end = first_word_end.replace("-","")
+        first_word_end_line_end = first_words_end[0].replace("-","")
         if word_to_be_removed.startswith(first_word_end_line_end):
             logger.warning(f"Stopped removing, as it seems a - case: {first_word_end_line_end}, {transcript_list[-1]}")
-            transcript_list[-1] = first_word_end
+            transcript_list[-1] = first_words_end[0]
             break
 
-        fuzz_ratio = fuzz.ratio(first_word_end,word_to_be_removed)
+        fuzz_ratio = fuzz.ratio(first_words_end[0],word_to_be_removed)
         if fuzz_ratio >=75:
             logger.warning(
-                f"Did not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_word_end}, {transcript_list[-1]}, Ratio: {fuzz_ratio}")
+                f"Did not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_words_end[0]}, {transcript_list[-1]}, Ratio: {fuzz_ratio}")
             break
 
         if fuzz_ratio < 75:
