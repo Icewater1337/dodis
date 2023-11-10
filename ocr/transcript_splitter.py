@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 import cv2
@@ -13,6 +14,7 @@ from matplotlib import pyplot as plt, patches
 from numpy import argmin, argmax
 from pdf2image import convert_from_path
 from pytesseract import image_to_string, image_to_data
+from loguru import logger
 
 def preprocess_pil_image(pil_image):
     # Convert PIL Image to OpenCV format (grayscale)
@@ -192,12 +194,12 @@ def find_matching_index_back(ocrd, transcript, start_idx_ocrd, start_idx_transcr
 
     return -1, -1, inexact
 def convert_pdf_to_images(pdf_path):
-    print(f"Trying to load {pdf_path}")
+    # print(f"Trying to load {pdf_path}")
     try:
         images = convert_from_path(pdf_path, dpi=300)
     except:
         images = []
-        print(f"Could not load {pdf_path}. Skipping file")
+        # print(f"Could not load {pdf_path}. Skipping file")
     return images
 
 def auto_crop(image):
@@ -411,7 +413,6 @@ def extract_corresponding_transcript(ocr_words, full_transcript):
     # ocr_words = ocr_text.split()
     margin_transcript = full_transcript.split()
     transcript_words = full_transcript.split()
-
     ocr_idx, transcript_idx, inexact_start = find_matching_index_front(ocr_words, full_transcript)
 
     if ocr_idx == -1 or transcript_idx == -1:
@@ -499,7 +500,7 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
     y_1_s = [box[1] for box in word_boxes.values()]
 
     if are_values_close(y_1_s, 1.3 * average_height) or len(indices_to_keep) < 15 or len(transcript_list) < 15:
-        print("One liner, skip")
+        logger.warning("Skipping backcrop, as it seems to be a one liner")
         return None, None
 
     crop_x1 = min([box[0] for box in word_boxes.values()])
@@ -532,14 +533,14 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
                 # and (crop_y1 <= y1 <= crop_y2 and crop_y1 <= y2 <= crop_y2 and crop_x1 -10 <= x1 <= crop_x2+10 and crop_x1-10 <= x2 <= crop_x2+10):
                 diff_top = abs(y1 - crop_y1)
                 if diff_top > 4 * average_height:
-                    print(f"diff top seems unreasonable, skip box {index}, diff is {diff_top}")
+                    logger.warning(f"diff top seems unreasonable, skip box {index}, diff is {diff_top}")
                     continue
                 crop_y1 = y2
                 cropi_boxi_first = (x1,y1,x2,y2)
             elif index > indices_to_keep[-1] and crop_y1 <= y1 <= crop_y2:
                 diff_bot = abs(crop_y2 - y2)
                 if diff_bot > 4 * average_height:
-                    print(f"diff bot seems unreasonable, skip box {index}, diff is {diff_bot}")
+                    logger.warning(f"diff bot seems unreasonable, skip box {index}, diff is {diff_bot}")
                     continue
                 crop_y2 = y1
                 cropi_boxi_last = (x1,y1,x2,y2)
@@ -594,9 +595,11 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             break
 
     dropped_off_indices = sorted(dropped_off_indices)
-    #ToDO Check margin here=? maybe we do not need to be as strict above.
-    # Keep in mind that we only want to remove boxes and words that are one whole line below (thats a certain amount of y.
-    #Amd wjat is the relation of y2 form previous line?
+
+
+    # First try to reomve from start by looking at a enaxct match for the first three
+    #words on the new line.
+
     rm_from_start = 0
     current_diff_start = 0
     rm_from_end = 0
@@ -607,6 +610,17 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
                 del word_boxes[idx]
             if idx == indices_to_keep[i]:
                 rm_from_start += 1
+                # Add check for things like z. B. where there is a spüacei in ebtwen
+                transcript_word = transcript_list[i]
+                ocr_word = tessdata["text"][idx]
+                if ocr_word != transcript_word and ocr_word.startswith(transcript_word) and i+1 < len(transcript_list):
+                    next_transcript_word = transcript_list[i+1]
+                    combined_word = transcript_word + next_transcript_word
+                    if combined_word == ocr_word:
+                        logger.warning(
+                            f"Found off behavior in transcript, where the word {ocr_word} starts with {transcript_word}")
+                        logger.warning(f"Attempt to resovle, as the combined word {combined_word} matches the ocr word {ocr_word}")
+                        rm_from_start += 1
 
     if dropped_off_indices and dropped_off_indices[-1] == indices_to_keep[-1]:
         for i, back_idx in enumerate(dropped_off_indices[::-1]):
@@ -614,9 +628,16 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
                 del word_boxes[back_idx]
             if back_idx == indices_to_keep[::-1][i]:
                 rm_from_end += 1
-
-
-
+                # Add check for things like z. B. where there is a spüacei in ebtwen
+                transcript_word = transcript_list[-i]
+                ocr_word = tessdata["text"][back_idx]
+                if ocr_word != transcript_word and ocr_word.endswith(transcript_word) and i + 1 < len(transcript_list):
+                    next_transcript_word = transcript_list[-(i + 1)]
+                    combined_word = next_transcript_word + transcript_word
+                    if combined_word == ocr_word:
+                        logger.warning(f"Found off behavior in transcript, where the word {ocr_word} ends with {transcript_word}")
+                        logger.warning(f"Attempt to resovle, as the combined word {combined_word} matches the ocr word {ocr_word}")
+                        rm_from_end += 1
 
 
 
@@ -625,19 +646,29 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             del transcript_list[0]
         else:
             if transcript_list:
-                print("Could not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_start, transcript_list[0])
+                logger.warning(f"Did not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_word_start}, {transcript_list[0]}")
                 if len(transcript_list) < 15:
                     return None, None
                 break
     for i in range(rm_from_end):
-        if transcript_list and fuzz.ratio(first_word_end,transcript_list[-1]) < 75:
+        if not transcript_list or len(transcript_list) < 15:
+            logger.warning(f"Abort. The transcript list is empty or too short to remove from end. The transcript list is: {transcript_list}")
+            return None, None
+        word_to_be_removed = transcript_list[-1]
+        first_word_end_line_end = first_word_end.replace("-","")
+        if word_to_be_removed.startswith(first_word_end_line_end):
+            logger.warning(f"Stopped removing, as it seems a - case: {first_word_end_line_end}, {transcript_list[-1]}")
+            transcript_list[-1] = first_word_end
+            break
+
+        fuzz_ratio = fuzz.ratio(first_word_end,word_to_be_removed)
+        if fuzz_ratio >=75:
+            logger.warning(
+                f"Did not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_word_end}, {transcript_list[-1]}, Ratio: {fuzz_ratio}")
+            break
+
+        if fuzz_ratio < 75:
             del transcript_list[-1]
-        else:
-            if transcript_list:
-                print("Could not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: ", first_word_end, transcript_list[-1])
-                if len(transcript_list) < 15:
-                    return None, None
-                break
     # Add padding
     padding = 2
     crop_x1 = 0
@@ -726,10 +757,12 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
 
     txt_filename = os.path.basename(text_path).replace(".txt", "")
     pdf_filename = os.path.basename(pdf_path).replace(".pdf", "")
+    logger.trace(f"Processing {pdf_filename}")
     for idx, image in enumerate(images, start=1):
+        logger.trace(f"Processing page {idx} of {len(images)}")
         # image = find_text_block_2(image)
-        if idx != 12:
-            continue
+        # if idx != 11:
+        #     continue
         is_first_page = idx == 1
         image = preprocess_image(image,is_first_page)
         orig_img = image.copy()
@@ -740,6 +773,7 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
         ocr_text = ocr_data["text"]
         # ocr_text = extract_text_from_image_easyocr(image)
         full_transcript_tmp = full_transcript
+        logger.trace(f"Trying to match main text for pdf  {pdf_path} page {idx}.")
         # Main etxt --------------------
         matched_text, full_transcript, inexact, wanted_ocr_indices, margin_transcript =  extract_corresponding_transcript(ocr_text, full_transcript)
         # Footnotes --------------------
@@ -747,8 +781,10 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
             ocr_text, full_footnotes_transcript)
 
         if matched_text is None or len(matched_text.split()) == 0:
-            print(f"Couldn't match main text for pdf  {pdf_path} page {idx}.")
+            logger.warning(f"Couldn't match main text for pdf  {pdf_path} page {idx}.")
         else:
+            logger.success(f"Matched main text for pdf  {pdf_path} page {idx}.")
+            logger.trace(f"Trying to backcrop image for pdf  {pdf_path} page {idx}.")
             img_to_save, matched_text = backcrop_image(orig_img, wanted_ocr_indices, ocr_data, matched_text)
 
              # text_alignment_match(margin_transcript, img_to_save)
@@ -762,10 +798,13 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
 
                 # Optionally save the image
                 cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}.png", np.array(img_to_save))
-
+                logger.success(f"Saved page {idx} of {len(images)}")
+                logger.success(f"Final words in transcript are {len(matched_text.split())}")
         if matched_footnotes is None or len(matched_footnotes.split()) == 0 or footnotes_idx_in_main(wanted_ocr_indices_fn, wanted_ocr_indices):
-            print(f"Couldn't match footnotes for pdf  {pdf_path} page {idx}.")
+            logger.warning(f"Couldn't match footnotes for pdf  {pdf_path} page {idx}.")
         else:
+            logger.success(f"Matched footnotes for pdf  {pdf_path} page {idx}.")
+            logger.trace(f"Trying to backcrop footnote image for pdf  {pdf_path} page {idx}.")
             img_to_save, matched_footnotes = backcrop_image(orig_img, wanted_ocr_indices_fn, ocr_data, matched_footnotes)
             output_folder_tmp = f"{output_folder}inexact/" if inexact_fn else f"{output_folder}exact/"
             Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
@@ -773,10 +812,10 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
             if img_to_save is not None:
                 with open(f"{output_folder_tmp}{txt_filename}_{idx:03}_footnotes.txt", 'w') as f:
                     f.write(matched_footnotes)
-
                 # Optionally save the image
                 cv2.imwrite(f"{output_folder_tmp}{pdf_filename}_{idx:03}_footnotes.png", np.array(img_to_save))
-
+                logger.success(f"Saved fontoote of page {idx} of {len(images)}")
+                logger.success(f"Final words in transcript are {len(matched_footnotes.split())}")
 
 if __name__ == "__main__":
     pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/part1/"
@@ -788,6 +827,13 @@ if __name__ == "__main__":
     single_file_pdf = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/35754.pdf"
     single_file_txt = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/35754.txt"
     single_file_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/footnotes_35754.txt"
+    log_file = f"{output_folder}creatino_log.txt"
+
+    log_level = "TRACE"
+    log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
+    logger.add(sys.stdout, level=log_level, format=log_format, colorize=True, backtrace=True, diagnose=True)
+    logger.add(log_file, level=log_level, format=log_format, colorize=False, backtrace=True, diagnose=True)
+
     #23, 26,3, 42968
     #35754_011
     #55703_004_footnotes
