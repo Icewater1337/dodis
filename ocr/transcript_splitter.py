@@ -428,6 +428,13 @@ def extract_corresponding_transcript(ocr_words, full_transcript):
 
     relevant_indices = list(range(ocr_idx, ocr_end_index+ocr_idx + 1))
 
+    ocr_words_no_space = ocr_words[:ocr_end_index + 1]
+    ocr_words_no_space = [word for word in ocr_words_no_space if word != ""]
+    transcript_matched_words = transcript_words[:transcript_end_idx+1]
+    if abs(len(ocr_words_no_space)-(len(transcript_matched_words))) > 20:
+        logger.warning(f"We have a huge diffeernce between the ocr adn transcript end indices. Skipping. "
+                       f"OCR idx diff {len(ocr_words_no_space)} and transcript diff {len(transcript_matched_words)}")
+        return None, full_transcript, True, [], []
     if ocr_end_index == -1 or transcript_end_idx == -1 or len(relevant_indices) < 15 or len(transcript_words) < 15:
         return None, full_transcript, True, [], []
 
@@ -474,6 +481,8 @@ def are_values_close(lst, margin):
 
 def is_three_word_match(i, transcript_list, first_words_start):
     for j in range(len(first_words_start)):
+        if i + j >= len(transcript_list):
+            return False
         transcript_word = transcript_list[i + j]
         if fuzz.ratio(first_words_start[j], transcript_word) < 80:
             return False
@@ -574,15 +583,16 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         if y1 < crop_y1 - 0.2 * average_height:
             dropped_off_indices.append(index)
             cntr = 0
+            first_words_start = []
         else:
             cntr += 1
             if not first_words_start:
                 tmp_idi = index
-                while tmp_idi < index +3:
+                while len(first_words_start) < 3:
                     word = tessdata["text"][tmp_idi]
                     if word != "":
                         first_words_start.append(word)
-                        tmp_idi += 1
+                    tmp_idi += 1
         if cntr == 3:
             break
     #from end
@@ -600,15 +610,16 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         if y2 > crop_y2 + 0.2 * average_height:
             dropped_off_indices.append(index)
             cntr = 0
+            first_words_end = []
         else:
             cntr += 1
             if not first_words_end:
                 tmp_idi = index
-                while tmp_idi > index - 3:
+                while len(first_words_end) < 3:
                     word = tessdata["text"][tmp_idi]
                     if word != "":
                         first_words_end.append(word)
-                        tmp_idi -= 1
+                    tmp_idi -= 1
         if cntr == 3:
             break
 
@@ -700,13 +711,13 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         word_to_be_removed = re.sub('[^a-zA-Z]+', '', transcript_list[0])
         # first_word_start_line_start = first_words_start[0].replace("-","")
         first_word_start_line_start = re.sub('[^a-zA-Z]+', '', first_words_start[0])
-        if word_to_be_removed.endswith(first_word_start_line_start):
+        if word_to_be_removed != "" and first_word_start_line_start != "" and word_to_be_removed.endswith(first_word_start_line_start):
             logger.warning(f"Stopped removing, as it seems a - case: {first_word_start_line_start}, {transcript_list[0]}")
             transcript_list[0] = first_words_start[0]
             break
 
         fuzz_ratio = fuzz.ratio(first_words_start[0],word_to_be_removed)
-        if fuzz_ratio >=75:
+        if word_to_be_removed != "" and fuzz_ratio >=75:
             logger.warning(f"Did not remove from start, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_words_start[0]}, {transcript_list[0]}, Ratio: {fuzz_ratio}")
             break
 
@@ -720,13 +731,13 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         word_to_be_removed = re.sub('[^a-zA-Z]+', '', transcript_list[-1])
         first_word_end_line_end = re.sub('[^a-zA-Z]+', '', first_words_end[0])
         # first_word_end_line_end = first_words_end[0].replace("-","")
-        if word_to_be_removed.startswith(first_word_end_line_end):
+        if word_to_be_removed != "" and first_word_end_line_end != "" and word_to_be_removed.startswith(first_word_end_line_end):
             logger.warning(f"Stopped removing, as it seems a - case: {first_word_end_line_end}, {transcript_list[-1]}")
             transcript_list[-1] = first_words_end[0]
             break
 
         fuzz_ratio = fuzz.ratio(first_words_end[0],word_to_be_removed)
-        if fuzz_ratio >=75:
+        if word_to_be_removed != "" and fuzz_ratio >=75:
             logger.warning(
                 f"Did not remove from end, as we foudn a match with SED to the presumed start fo the line word. The words compared are: {first_words_end[0]}, {transcript_list[-1]}, Ratio: {fuzz_ratio}")
             break
@@ -825,7 +836,7 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
     for idx, image in enumerate(images, start=1):
         logger.trace(f"Processing page {idx} of {len(images)}")
         # image = find_text_block_2(image)
-        # if idx != 9:
+        # if idx != 5:
         #     continue
         is_first_page = idx == 1
         image = preprocess_image(image,is_first_page)
@@ -882,18 +893,22 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
                 logger.success(f"Final words in transcript are {len(matched_footnotes.split())}")
 
 if __name__ == "__main__":
-    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/part1/"
-    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/computer/"
+    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/fr/year_sorted/computer/part1/"
+    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/year_sorted/computer/"
+    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
     txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    # output_folder = "/media/fuchs/d/dataset_try_3/parts/de/"
-    output_folder = "/media/fuchs/d/testi_output/"
-    debug = True
+    output_folder = "/media/fuchs/d/dataset_try_4/parts/fr/"
+    # output_folder = "/media/fuchs/d/testi_output/"
+    log_file = f"{output_folder}creatino_de_log_1.txt"
+
+    debug = False
     dbeug_pdf_base = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/"
-    # pdf_list = [23,26,3,42968,35754,55703,30751,45823,55703,48366,47372,54174,327000,8303,54813]
-    pdf_list = [35754]
+    pdf_list = [23,26,3,42968,55703,30751,45823,55703,48366,47372,54174,32700,8303,54813, 35754]
+    pdf_list = [45823,55703,48366,47372,54174,32700,8303,54813, 35754]
+    pdf_list = [54174]
+    # pdf_list = [10156]
     debug_txt_base = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
     debug_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    log_file = f"{output_folder}creatino_log.txt"
 
     debug_pdf_fnames = [f"{dbeug_pdf_base}{pdf_name}.pdf" for pdf_name in pdf_list]
     debug_txt_fnamse = [f"{debug_txt_base}{pdf_name}.txt" for pdf_name in pdf_list]
