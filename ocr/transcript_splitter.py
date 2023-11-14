@@ -692,15 +692,16 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
             if back_idx == indices_to_keep[::-1][i]:
                 rm_from_end += 1
                 # Add check for things like z. B. where there is a spüacei in ebtwen
-                transcript_word = transcript_list[-i]
-                ocr_word = tessdata["text"][back_idx]
-                if ocr_word != transcript_word and ocr_word.endswith(transcript_word) and i + 1 < len(transcript_list):
-                    next_transcript_word = transcript_list[-(i + 1)]
-                    combined_word = next_transcript_word + transcript_word
-                    if combined_word == ocr_word:
-                        logger.warning(f"Found off behavior in transcript, where the word {ocr_word} ends with {transcript_word}")
-                        logger.warning(f"Attempt to resovle, as the combined word {combined_word} matches the ocr word {ocr_word}")
-                        rm_from_end += 1
+                if i < len(transcript_list):
+                    transcript_word = transcript_list[-i]
+                    ocr_word = tessdata["text"][back_idx]
+                    if ocr_word != transcript_word and ocr_word.endswith(transcript_word) and i + 1 < len(transcript_list):
+                        next_transcript_word = transcript_list[-(i + 1)]
+                        combined_word = next_transcript_word + transcript_word
+                        if combined_word == ocr_word:
+                            logger.warning(f"Found off behavior in transcript, where the word {ocr_word} ends with {transcript_word}")
+                            logger.warning(f"Attempt to resovle, as the combined word {combined_word} matches the ocr word {ocr_word}")
+                            rm_from_end += 1
 
 
 
@@ -893,11 +894,11 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
                 logger.success(f"Final words in transcript are {len(matched_footnotes.split())}")
 
 if __name__ == "__main__":
-    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/fr/year_sorted/computer/part1/"
+    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/part1/"
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/year_sorted/computer/"
-    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
+    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
     txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    output_folder = "/media/fuchs/d/dataset_try_4/parts/fr/"
+    output_folder = "/media/fuchs/d/dataset_try_4/parts/var/"
     # output_folder = "/media/fuchs/d/testi_output/"
     log_file = f"{output_folder}creatino_de_log_1.txt"
 

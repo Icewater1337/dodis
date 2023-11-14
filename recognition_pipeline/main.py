@@ -1,4 +1,5 @@
 import sys
+from multiprocessing import Pool
 from pathlib import Path
 
 import cv2
@@ -21,45 +22,47 @@ def calculate_accuracy(transcript_txt, text):
     return cer_res.item(), wer_res.item()
 
 
+def process_file(model, file, txt_folder):
+    logger.trace(f"Start with file: {file}")
+    image = Image.open(file)
+    image = preprocess_image(image)
+    transcript_path = Path(txt_folder) / file.with_suffix(".txt").name
+    transcript_txt = transcript_path.read_text(encoding="utf-8")
+
+    predicted_text = model.predict(image)
+    logger.trace(f"Text: {predicted_text} for file: {file}")
+    cer, wer = calculate_accuracy(transcript_txt, predicted_text)
+    logger.success(f"File: {file} | CER: {cer} | WER: {wer}")
+
+    return {
+        "filename": file.name,
+        "CER": cer,
+        "WER": wer,
+        "predicted": predicted_text,
+        "actual": transcript_txt
+    }
+
 def evaluate_model(model_name, languages, output_folder, img_folder, txt_folder):
     model_dict = {"tesseract": TesseractModel, "easyocr": EasyOcrModel}
     model = model_dict[model_name](languages)
-    results = []  # List to hold dictionaries with the results
     output_file_path = Path(output_folder) / f"results_{model_name}.csv"
-    results_df = pd.read_csv(output_file_path)
-    calculate_dataset_wer_cer(results_df)
+    Path(output_folder).mkdir(parents=True, exist_ok=True)
+    # Prepare arguments for starmap
+    file_paths = [(model, file, txt_folder) for file in Path(img_folder).iterdir()]
 
-    for file in Path(img_folder).iterdir():
-        logger.trace(f"Start with file: {file}")
-        image = Image.open(file)
-        image = preprocess_image(image)
-        transcript_path = Path(txt_folder) / file.with_suffix(".txt").name
-        transcript_txt = transcript_path.read_text(encoding="utf-8")
-
-        predicted_text = model.predict(image)
-        logger.trace(f"Text: {predicted_text} for file: {file}")
-        cer, wer = calculate_accuracy(transcript_txt, predicted_text)
-        logger.success(f"File: {file} | CER: {cer} | WER: {wer}")
-
-        # Append a dictionary with results for the current file to the results list
-        results.append({
-            "filename": file.name,
-            "CER": cer,
-            "WER": wer,
-            "predicted": predicted_text,
-            "actual": transcript_txt
-        })
+    # Using multiprocessing Pool to process files in parallel
+    with Pool() as pool:
+        results = pool.starmap(process_file, file_paths)
 
     # Convert the results list to a DataFrame
     results_df = pd.DataFrame(results)
-
 
     # Save the DataFrame to a CSV file
     results_df.to_csv(output_file_path, index=False)
     calculate_dataset_wer_cer(results_df)
 
-    return results_df  # Optionally return the DataFrame
 
+    return results_df
 def preprocess_image(image):
     logger.trace(f"Preprocessing image {image}")
     image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
@@ -98,19 +101,19 @@ def calculate_dataset_wer_cer(dataframe):
     avg_cer = filtered_cer["CER"].mean()
     avg_wer = filtered_wer["WER"].mean()
 
-    print(f"Filtered Average CER: {avg_cer} | Average WER: {avg_wer}")
+    logger.success(f"Filtered Average CER: {avg_cer} | Average WER: {avg_wer}")
     avg_cer_unfiltered = dataframe["CER"].mean()
     avg_wer_unfiltered = dataframe["WER"].mean()
-    print(f"Unfiltered Average CER: {avg_cer_unfiltered} | Average WER: {avg_wer_unfiltered}")
+    logger.success(f"Unfiltered Average CER: {avg_cer_unfiltered} | Average WER: {avg_wer_unfiltered}")
 
 if __name__ == "__main__":
     models = ["tesseract", "easyocr"]
     # models = ["easyocr"]
     languages = ["de", "fr", "it", "en"]
-    output_folder = "/media/fuchs/d/dataset_try_3/final_dataset/output/"
-    img_folder = "/media/fuchs/d/dataset_try_3/final_dataset/png/"
-    txt_folder = "/media/fuchs/d/dataset_try_3/final_dataset/txt/"
-    log_file = "/media/fuchs/d/dataset_try_3/final_dataset/output/log.txt"
+    output_folder = "/media/fuchs/d/dataset_try_4/final_dataset/output/"
+    img_folder = "/media/fuchs/d/dataset_try_4/final_dataset/png/"
+    txt_folder = "/media/fuchs/d/dataset_try_4/final_dataset/txt/"
+    log_file = "/media/fuchs/d/dataset_try_4/final_dataset/output/log.txt"
 
     log_level = "TRACE"
     log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
