@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from recognition_pipeline.models.standard import TesseractModel, EasyOcrModel
+from recognition_pipeline.models.standard import TesseractModel, EasyOcrModel, TrOCR
 from loguru import logger
 from torchmetrics.text import CharErrorRate, WordErrorRate
 
@@ -25,7 +25,10 @@ def calculate_accuracy(transcript_txt, text):
 def process_file(model, file, txt_folder):
     logger.trace(f"Start with file: {file}")
     image = Image.open(file)
-    image = preprocess_image(image)
+    if isinstance(model, TrOCR):
+        image = image.convert("RGB")
+    else:
+        image = preprocess_image(image)
     transcript_path = Path(txt_folder) / file.with_suffix(".txt").name
     transcript_txt = transcript_path.read_text(encoding="utf-8")
 
@@ -43,17 +46,19 @@ def process_file(model, file, txt_folder):
     }
 
 def evaluate_model(model_name, languages, output_folder, img_folder, txt_folder):
-    model_dict = {"tesseract": TesseractModel, "easyocr": EasyOcrModel}
+    model_dict = {"tesseract": TesseractModel, "easyocr": EasyOcrModel, "trocr": TrOCR}
     model = model_dict[model_name](languages)
     output_file_path = Path(output_folder) / f"results_{model_name}.csv"
     Path(output_folder).mkdir(parents=True, exist_ok=True)
     # Prepare arguments for starmap
     file_paths = [(model, file, txt_folder) for file in Path(img_folder).iterdir()]
-
+    # file_paths = file_paths[:100]
+    results = []
     # Using multiprocessing Pool to process files in parallel
-    with Pool() as pool:
-        results = pool.starmap(process_file, file_paths)
-
+    # with Pool() as pool:
+    #     results = pool.starmap(process_file, file_paths)
+    for file_path in file_paths:
+        results.append(process_file(*file_path))
     # Convert the results list to a DataFrame
     results_df = pd.DataFrame(results)
 
@@ -107,8 +112,9 @@ def calculate_dataset_wer_cer(dataframe):
     logger.success(f"Unfiltered Average CER: {avg_cer_unfiltered} | Average WER: {avg_wer_unfiltered}")
 
 if __name__ == "__main__":
-    models = ["tesseract", "easyocr"]
+    # models = ["tesseract", "easyocr", "trocr"]
     # models = ["easyocr"]
+    models = ["trocr"]
     languages = ["de", "fr", "it", "en"]
     output_folder = "/media/fuchs/d/dataset_try_4/final_dataset/output/"
     img_folder = "/media/fuchs/d/dataset_try_4/final_dataset/png/"
