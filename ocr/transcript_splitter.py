@@ -14,7 +14,7 @@ from fuzzywuzzy import fuzz
 from matplotlib import pyplot as plt, patches
 from numpy import argmin, argmax
 from pdf2image import convert_from_path
-from pytesseract import image_to_string, image_to_data
+from pytesseract import image_to_string, image_to_data, TesseractError
 from loguru import logger
 
 def preprocess_pil_image(pil_image):
@@ -362,7 +362,11 @@ def extract_text_from_image(image_path):
     return image_to_string(image_path)
 
 def extract_data_from_image(image):
-    return image_to_data(image,output_type=pytesseract.Output.DICT)
+    "deu+fra+ita+eng"
+    try:
+        return image_to_data(image,output_type=pytesseract.Output.DICT,lang="deu+fra+ita+eng")
+    except TesseractError:
+        return image_to_data(image,output_type=pytesseract.Output.DICT)
 def extract_text_from_image_easyocr(image):
     reader = easyocr.Reader(['de'])
     results = reader.readtext(np.array(image))
@@ -837,7 +841,7 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
     for idx, image in enumerate(images, start=1):
         logger.trace(f"Processing page {idx} of {len(images)}")
         # image = find_text_block_2(image)
-        # if idx != 5:
+        # if idx != 3:
         #     continue
         is_first_page = idx == 1
         image = preprocess_image(image,is_first_page)
@@ -861,12 +865,14 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
         else:
             logger.success(f"Matched main text for pdf  {pdf_path} page {idx}.")
             logger.trace(f"Trying to backcrop image for pdf  {pdf_path} page {idx}.")
-            img_to_save, matched_text = backcrop_image(orig_img, wanted_ocr_indices, ocr_data, matched_text)
+            try:
+                img_to_save, matched_text = backcrop_image(orig_img, wanted_ocr_indices, ocr_data, matched_text)
+                output_folder_tmp = f"{output_folder}inexact/" if inexact else f"{output_folder}exact/"
+                Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
 
-             # text_alignment_match(margin_transcript, img_to_save)
-
-            output_folder_tmp = f"{output_folder}inexact/" if inexact else f"{output_folder}exact/"
-            Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
+            except:
+                logger.warning(f"Something went wrong with backcropping. Skipping")
+                img_to_save = None
 
             if img_to_save is not None:
                 with open(f"{output_folder_tmp}{txt_filename}_{idx:03}.txt", 'w') as f:
@@ -881,10 +887,13 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
         else:
             logger.success(f"Matched footnotes for pdf  {pdf_path} page {idx}.")
             logger.trace(f"Trying to backcrop footnote image for pdf  {pdf_path} page {idx}.")
-            img_to_save, matched_footnotes = backcrop_image(orig_img, wanted_ocr_indices_fn, ocr_data, matched_footnotes)
-            output_folder_tmp = f"{output_folder}inexact/" if inexact_fn else f"{output_folder}exact/"
-            Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
-
+            try:
+                img_to_save, matched_footnotes = backcrop_image(orig_img, wanted_ocr_indices_fn, ocr_data, matched_footnotes)
+                output_folder_tmp = f"{output_folder}inexact/" if inexact_fn else f"{output_folder}exact/"
+                Path(output_folder_tmp).mkdir(parents=True, exist_ok=True)
+            except:
+                logger.warning(f"Something went wrong with backcropping. Skipping")
+                img_to_save = None
             if img_to_save is not None:
                 with open(f"{output_folder_tmp}{txt_filename}_{idx:03}_footnotes.txt", 'w') as f:
                     f.write(matched_footnotes)
@@ -894,19 +903,19 @@ def main(pdf_path,text_path,footnotes_text_path,output_folder):
                 logger.success(f"Final words in transcript are {len(matched_footnotes.split())}")
 
 if __name__ == "__main__":
-    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/computer/part1/"
+    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/fr/year_sorted/computer/part3/"
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/year_sorted/computer/"
-    pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
+    # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
     txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    output_folder = "/media/fuchs/d/dataset_try_4/parts/var/"
+    output_folder = "/media/fuchs/d/dataset_try_5/parts/fr/"
     # output_folder = "/media/fuchs/d/testi_output/"
-    log_file = f"{output_folder}creatino_de_log_1.txt"
+    log_file = f"{output_folder}creatino_de_log_3.txt"
 
     debug = False
     dbeug_pdf_base = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/"
     pdf_list = [23,26,3,42968,55703,30751,45823,55703,48366,47372,54174,32700,8303,54813, 35754]
     pdf_list = [45823,55703,48366,47372,54174,32700,8303,54813, 35754]
-    pdf_list = [54174]
+    pdf_list = [39653]
     # pdf_list = [10156]
     debug_txt_base = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
     debug_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"

@@ -45,6 +45,6 @@ def move_pdfs(src_dir, dest_dir):
 
 
 # Example usage:
-src_folder = "/media/fuchs/d/dataset_try_4/parts/"
-dest_folder = "/media/fuchs/d/dataset_try_4/final_dataset/"
+src_folder = "/media/fuchs/d/dataset_try_5/parts/"
+dest_folder = "/media/fuchs/d/dataset_try_5/final_dataset/"
 move_pdfs(src_folder, dest_folder)
