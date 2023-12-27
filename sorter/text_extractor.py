@@ -1,6 +1,8 @@
 from pathlib import Path
-from urllib.request import urlopen
 from bs4 import BeautifulSoup
+
+from utils.html_util import extract_text_from_soup
+
 
 def parse_html_file(html_file):
     with open(html_file, 'r',  encoding="utf-8") as html_file_open:
@@ -26,13 +28,6 @@ def parse_html_file(html_file):
 
     return main_text, footnotes_text
 
-
-def extract_text_from_soup(soup):
-    text = soup.get_text()
-    lines = (line.strip() for line in text.splitlines())
-    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-    text = '\n'.join(chunk for chunk in chunks if chunk)
-    return text
 
 if __name__ == "__main__":
     base_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/html/"
