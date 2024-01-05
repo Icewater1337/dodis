@@ -174,10 +174,13 @@ if __name__ == "__main__":
     # model_names = ["tesseract", "easyocr"]
     models = []
     # preprocess_steps = [binarize, deskew, denoise_dilate, denoise_gaussian, thinning]
-    preprocess_steps_full = {"nothing": [],
-                             "bin+ deskew": [binarize, deskew],"bin+thin": [binarize, thinning],
-                             "bin+denoiose": [binarize, denoise_gaussian],
-                             "bin+deskew+thin+denoise": [binarize, deskew, thinning, denoise_gaussian],
+    # preprocess_steps_full = {"nothing": [],
+    #                          "bin+ deskew": [binarize, deskew],"bin+thin": [binarize, thinning],
+    #                          "bin+denoiose": [binarize, denoise_gaussian],
+    #                          "bin+deskew+thin+denoise": [binarize, deskew, thinning, denoise_gaussian],
+    #                          }
+    preprocess_steps_full = {
+                             "bin": [binarize],
                              }
 
     # preprocess_steps = [binarize, deskew, thinning, denoise_gaussian]
