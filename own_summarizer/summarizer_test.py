@@ -1,11 +1,15 @@
 from pathlib import Path
-
+import openai
+import torch
 from loguru import logger
 from transformers import BartTokenizer, BartForConditionalGeneration
+
+from own_summarizer.summary_quality_eval import check_grammar_and_spelling, evaluate_with_bertscore
 from utils.folder_util import load_file_contents_in_folder
 import argparse, sys, os
 from transformers import T5Tokenizer, T5ForConditionalGeneration,pipeline
 from summarizer import Summarizer
+from gpt_summarizer import Summarizer as GPTSummarizer
 
 
 # Summarize function
@@ -23,8 +27,9 @@ def parse_args():
 
 
 def summarize_pipeline(file_content, summarizer):
-
-    return summarizer(file_content, max_length=len(file_content)/10, min_length=100, do_sample=False, truncation=True)[0]['summary_text']
+    if torch.cuda.is_available():
+        logger.trace("cuda is available")
+    return summarizer(file_content, max_length=int(len(file_content)/10), min_length=100, do_sample=False, truncation=True)[0]['summary_text']
 
 def summarize_t5(text, model, tokenizer):
     # Add the summarization prefix
@@ -37,7 +42,19 @@ def summarize_distilbert(text, model):
     return model(text, num_sentences=5)
 
 
+def evaluate_summary(summary, file_content):
+    logger.trace("Evaluating quality of summary, using grammar check first")
+    number_of_errors, errors = check_grammar_and_spelling(summary)
+    logger.trace(f"Number of grammatical errors: {number_of_errors}")
+    for error in errors:
+        logger.trace(error)
+    logger.trace("Evaluating quality of summary, using bertscore")
+    precision, recall, f1 = evaluate_with_bertscore([summary], [file_content])
+    logger.trace(f"Precision: {precision}, Recall: {recall}, F1 Score: {f1}")
+
+
 if __name__ == "__main__":
+    openai.api_key = os.environ["OPENAI_API_KEY"]
     parsed_args = parse_args()
     input_folder = parsed_args.input_folder
     output_folder = parsed_args.output_folder
@@ -59,9 +76,10 @@ if __name__ == "__main__":
               "t5":{"model": T5Tokenizer.from_pretrained("t5-small"), "tokenizer": T5ForConditionalGeneration.from_pretrained("t5-small")}}
 
 
+    device = 0 if torch.cuda.is_available() else -1
 
-    #pipelines = {"bart": pipeline("summarization", model="facebook/bart-large-cnn"), "t5": pipeline("summarization", model="t5-small")}
-    pipelines = {"t5": pipeline("summarization", model="t5-small")}
+    pipelines = {"bart": pipeline("summarization", model="facebook/bart-large-cnn",  device=device), "t5": pipeline("summarization", model="t5-small",  device=device)}
+    #pipelines = {"t5": pipeline("summarization", model="t5-small")}
 
     for model_name, pipeline in pipelines.items():
         logger.trace(f"Start summarizing files using abstractive summarization model {model_name}")
@@ -70,20 +88,39 @@ if __name__ == "__main__":
             #summary = summarize_bart(file_content)
             summary = summarize_pipeline(file_content, pipeline)
             logger.success(f"Finished summarizing file {name}")
+
+            evaluate_summary(summary, file_content)
+
             output_folder_model = os.path.join(output_folder,"summaries", model_name)
             Path(output_folder_model).mkdir(parents=True, exist_ok=True)
             with open(os.path.join(output_folder_model, name), "w", encoding="utf-8") as file:
                 file.write(summary)
 
+    logger.trace("start with abstractrive summarization using gpt-4")
+    gpt_summarizer = GPTSummarizer()
+    for name, file_content in files_name_dict.items():
+        logger.trace(f"Summarizing file {name}")
+        # summary = summarize_bart(file_content)
+        summary = gpt_summarizer.summarize(file_content)
+        logger.success(f"Finished summarizing file {name}")
+
+        evaluate_summary(summary, file_content)
+
+        output_folder_model = os.path.join(output_folder, "summaries", "gpt4")
+        Path(output_folder_model).mkdir(parents=True, exist_ok=True)
+        with open(os.path.join(output_folder_model, name), "w", encoding="utf-8") as file:
+            file.write(summary)
 
     logger.trace("start with extractive summarization using distilbert")
 
     # Load the model
     model = Summarizer('distilbert-base-uncased')
+
     for name, file_content in files_name_dict.items():
         logger.trace(f"Summarizing file {name}")
         summary = summarize_distilbert(file_content, model)
         logger.success(f"Finished summarizing file {name}")
+        evaluate_summary(summary, file_content)
         output_folder_model = os.path.join(output_folder,"summaries", "distilbert")
         Path(output_folder_model).mkdir(parents=True, exist_ok=True)
         with open(os.path.join(output_folder_model, name), "w", encoding="utf-8") as file:
@@ -91,5 +128,10 @@ if __name__ == "__main__":
 
 
 
-
+# ToDO:
+# 3 Dokumente, kurze, mittlere, lange, Für jedes ein eigenes summary erstellen.
+# Immer gleiche anzahl tokens für alle modelle
+# 1. Tabelle mit allen toools und welche issues dass es gibt (vor/ nachteile). z.B. beliebig lange summaries machbar (checkbox).
+# 2. Tabelle mit fairen comparison scores. 1. Grammatikalisch, 2. Fakten, 3. VOllständigkeit
+# Get 3 Abstractive, get 3 generative summaries.
 
