@@ -11,5 +11,5 @@ def count_files_in_folder(root_dir):
 
 
 
-root_directory = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/de/year_sorted/"
+root_directory = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/year_sorted/computer/"
 count_files_in_folder(root_directory)

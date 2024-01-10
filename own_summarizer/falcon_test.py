@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import transformers
@@ -9,6 +11,8 @@ import torch
 
 
 model = "tiiuae/falcon-180B"
+
+
 access_token = os.environ["HUGGINGFACE_ACCESS_TOKEN"]
 
 tokenizer = AutoTokenizer.from_pretrained(model, access_token=access_token)

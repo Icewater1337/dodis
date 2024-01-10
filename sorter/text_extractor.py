@@ -34,9 +34,10 @@ if __name__ == "__main__":
     output_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
     Path(output_path).mkdir(parents=True, exist_ok=True)
 
-    for html_file in Path(base_path).iterdir():
+    all_htmls = list(Path(base_path).iterdir())
+    for html_file in  all_htmls:
         if html_file.is_file():
-            print("parse FIle: ", html_file)
+            print("parse File: ", html_file)
             main_text, footnotes_text = parse_html_file(html_file)
 
             with open(output_path + html_file.name.replace(html_file.suffix, ".txt"), "w") as file:

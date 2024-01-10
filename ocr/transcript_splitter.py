@@ -644,7 +644,7 @@ if __name__ == "__main__":
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/year_sorted/computer/"
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
     txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    output_folder = "/media/fuchs/d/dataset_try_5/parts/fr/"
+    output_folder = "/media/fuchs/d/dataset_try_6/parts/fr/"
     # output_folder = "/media/fuchs/d/testi_output/"
     log_file = f"{output_folder}creatino_de_log_3.txt"
 

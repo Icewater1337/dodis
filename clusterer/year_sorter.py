@@ -1,17 +1,20 @@
-import os
 import json
-import re
-import shutil
-from pathlib import Path
 import os
+import re
+from pathlib import Path
+from loguru import logger
+import sys
 
-# Directories
 pdf_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/pdf'
 json_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/json'
 txt_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/txt'
 output_dir = '/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/year_sorted/'
+log_file = os.path.join(output_dir, 'year_sorter.log')
 
-
+log_level = "TRACE"
+log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
+logger.add(sys.stdout, level=log_level, format=log_format, colorize=True, backtrace=True, diagnose=True)
+logger.add(log_file, level=log_level, format=log_format, colorize=False, backtrace=True, diagnose=True)
 
 
 pdf_files = [f for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
@@ -23,7 +26,7 @@ for pdf_file in pdf_files:
     year  = None
     json_file = pdf_file.replace('.pdf', '.json')
     txt_file = pdf_file.replace('.pdf', '.txt')
-    print(f"Moving file {json_file}")
+    logger.trace(f"Moving file {json_file}")
     with open(os.path.join(json_dir, json_file), 'r') as f:
         data = json.load(f)
         document_date = data['data']['documentDate']
@@ -36,7 +39,7 @@ for pdf_file in pdf_files:
                 month, year = match.groups()
                 day = '01'
             else:
-                print(f"Could not parse day or month {document_date}, trying year")
+                logger.trace(f"Could not parse day or month {document_date}, trying year")
                 match = date_pattern_year_only.search(document_date)
                 if match:
                     year = match.groups()[0]
@@ -45,7 +48,7 @@ for pdf_file in pdf_files:
         try:
             year = int(year)
         except:
-            print(f"Could not parse year {document_date} for document {pdf_file}")
+            logger.error(f"Could not parse year {document_date} for document {pdf_file}, skipping it.")
             continue
         # Determine the directory for the year range
         start_year = (year // 5) * 5
@@ -65,11 +68,11 @@ for pdf_file in pdf_files:
         # try:
         #     shutil.copy(os.path.join(txt_dir, txt_file), os.path.join(output_dir_year_txt, txt_file))
         # except FileNotFoundError:
-        #     print(f"Could not find file {txt_file}")
+        #     logger.trace(f"Could not find file {txt_file}")
         os.rename(os.path.join(pdf_dir, pdf_file), os.path.join(output_dir_year_pdf, pdf_file))
 
 
-print("Sorting complete!")
+logger.trace("Sorting complete!")
 
 
 
