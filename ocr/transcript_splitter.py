@@ -4,18 +4,13 @@ import sys
 from pathlib import Path
 
 import cv2
-import easyocr
-import layoutparser as lp
-import math
 import numpy as np
 import pytesseract
 from PIL import ImageOps
 from fuzzywuzzy import fuzz
-from matplotlib import pyplot as plt, patches
-from numpy import argmin, argmax
-from pdf2image import convert_from_path
-from pytesseract import image_to_string, image_to_data, TesseractError
 from loguru import logger
+from pdf2image import convert_from_path
+from pytesseract import image_to_data, TesseractError
 
 
 def preprocess_pil_image(pil_image):
@@ -254,12 +249,6 @@ def remove_top_part(image):
     img_cropped = np.array(image)[start_y:, :]
     return img_cropped
 
-
-def preprocess_image(image, is_first_page):
-    image = remove_white_border(image)
-    if is_first_page:
-        image = remove_top_part(image)
-    return np.array(image)
 
 
 def are_values_close(lst, margin):
@@ -565,8 +554,6 @@ def main(pdf_path, text_path, footnotes_text_path, output_folder):
         full_footnotes_transcript = f.read()
 
     images = convert_pdf_to_images(pdf_path)
-    # images = convert_from_path(pdf_path, dpi=300)
-    # images = [auto_crop(img) for img in images]
 
     txt_filename = os.path.basename(text_path).replace(".txt", "")
     pdf_filename = os.path.basename(pdf_path).replace(".pdf", "")
@@ -577,7 +564,10 @@ def main(pdf_path, text_path, footnotes_text_path, output_folder):
         # if idx != 3:
         #     continue
         is_first_page = idx == 1
-        image = preprocess_image(image, is_first_page)
+        image = remove_white_border(image)
+        if is_first_page:
+            image = remove_top_part(image)
+        image = np.array(image)
         orig_img = image.copy()
         image = preprocess_pil_image(image)
         # image = layout_parser_test(image)

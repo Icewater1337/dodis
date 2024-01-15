@@ -2,7 +2,7 @@ from pathlib import Path
 import openai
 import torch
 from loguru import logger
-from transformers import BartTokenizer, BartForConditionalGeneration
+from transformers import BartTokenizer, BartForConditionalGeneration, AutoTokenizer
 
 from own_summarizer.summary_quality_eval import check_grammar_and_spelling, evaluate_with_bertscore
 from utils.folder_util import load_file_contents_in_folder
@@ -29,7 +29,7 @@ def parse_args():
 def summarize_pipeline(file_content, summarizer):
     if torch.cuda.is_available():
         logger.trace("cuda is available")
-    return summarizer(file_content, max_length=int(len(file_content)/10), min_length=100, do_sample=False, truncation=True)[0]['summary_text']
+    return summarizer(file_content, max_length=int(len(file_content)/10), min_length=100, do_sample=False)[0]['summary_text']
 
 def summarize_t5(text, model, tokenizer):
     # Add the summarization prefix
@@ -58,7 +58,9 @@ if __name__ == "__main__":
     parsed_args = parse_args()
     input_folder = parsed_args.input_folder
     output_folder = parsed_args.output_folder
+    access_token = os.environ["HUGGINGFACE_ACCESS_TOKEN"]
 
+    tokenizer = AutoTokenizer.from_pretrained("tiiuae/falcon-180B", access_token=access_token)
     log_level = "TRACE"
     log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
 
@@ -70,16 +72,23 @@ if __name__ == "__main__":
     files_name_dict = load_file_contents_in_folder(input_folder, file_type="txt", return_dict=True)
     logger.trace(f"Finished loading files from {input_folder}")
 
-    model_names = ["facebook/bart-large-cnn", "t5-small"]
+    # model_names = ["facebook/bart-large-cnn", "t5-small", "tiiuae/falcon-180B"]
+    model_names = ["tiiuae/falcon-180B"]
 
-    models = {"bart":{"model": BartTokenizer.from_pretrained("facebook/bart-large-cnn"), "tokenizer": BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")},
-              "t5":{"model": T5Tokenizer.from_pretrained("t5-small"), "tokenizer": T5ForConditionalGeneration.from_pretrained("t5-small")}}
+    # models = {"bart":{"model": BartTokenizer.from_pretrained("facebook/bart-large-cnn"), "tokenizer": BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")},
+    #           "t5":{"model": T5Tokenizer.from_pretrained("t5-small"), "tokenizer": T5ForConditionalGeneration.from_pretrained("t5-small")},
+    #           "falcon":{"model": T5Tokenizer.from_pretrained("tiiuae/falcon-180B"), "tokenizer":  AutoTokenizer.from_pretrained("tiiuae/falcon-180B", access_token=access_token)}}
 
 
     device = 0 if torch.cuda.is_available() else -1
 
-    pipelines = {"bart": pipeline("summarization", model="facebook/bart-large-cnn",  device=device), "t5": pipeline("summarization", model="t5-small",  device=device)}
+    # pipelines = {"bart": pipeline("summarization", model="facebook/bart-large-cnn",  device=device),
+    #              "t5": pipeline("summarization", model="t5-small",  device=device),
+    #              "falcon": pipeline("text-generation", model="tiiuae/falcon-180B", torch_dtype=torch.bfloat16, trust_remote_code=True, device_map="auto")
+    #              }
     #pipelines = {"t5": pipeline("summarization", model="t5-small")}
+    pipelines = {"falcon": pipeline("text-generation", model="tiiuae/falcon-180B", tokenizer=tokenizer, torch_dtype=torch.bfloat16, trust_remote_code=True,  device=device)
+                 }
 
     for model_name, pipeline in pipelines.items():
         logger.trace(f"Start summarizing files using abstractive summarization model {model_name}")
