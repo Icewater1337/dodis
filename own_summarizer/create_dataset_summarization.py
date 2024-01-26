@@ -51,8 +51,8 @@ def save_modified_text(name, modified_text, save_folder):
 
 
 if __name__ == "__main__":
-    output_folder = "C:\\Users\\Mathias\\Desktop\\dodis_project\\transcripts\\summarizer_transcripts\\"
-    html_folder = "C:\\Users\\Mathias\\Desktop\\dodis_project\\transcripts\\html\\"
+    output_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/summarizer_transcripts/"
+    html_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/html/"
     html_files = load_file_contents_in_folder(html_folder, file_type="html", return_dict=True)
     for name, file_content  in html_files.items():
         main_text_div, footnotes_div = extract_htmls(file_content)

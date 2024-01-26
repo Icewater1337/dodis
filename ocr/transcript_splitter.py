@@ -9,6 +9,7 @@ import pytesseract
 from PIL import ImageOps
 from fuzzywuzzy import fuzz
 from loguru import logger
+from matplotlib import pyplot as plt
 from pdf2image import convert_from_path
 from pytesseract import image_to_data, TesseractError
 
@@ -216,7 +217,7 @@ def extract_corresponding_transcript(ocr_words, full_transcript):
     ocr_words_no_space = ocr_words[:ocr_end_index + 1]
     ocr_words_no_space = [word for word in ocr_words_no_space if word != ""]
     transcript_matched_words = transcript_words[:transcript_end_idx + 1]
-    if abs(len(ocr_words_no_space) - (len(transcript_matched_words))) > 20:
+    if abs(len(ocr_words_no_space) - (len(transcript_matched_words))) > 40:
         logger.warning(f"We have a huge diffeernce between the ocr adn transcript end indices. Skipping. "
                        f"OCR idx diff {len(ocr_words_no_space)} and transcript diff {len(transcript_matched_words)}")
         return None, full_transcript, True, [], []
@@ -264,6 +265,40 @@ def is_three_word_match(i, transcript_list, first_words_start):
             return False
     return True
 
+def plot_all_word_boxes(image, word_boxes, filename):
+    plt.figure(figsize=(10, 10))
+    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    for box in word_boxes.values():
+        plt.gca().add_patch(plt.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor='r', facecolor='none'))
+    plt.axis('off')  # Hide axes
+    plt.savefig(filename)  # Save the plot to a file
+    plt.show()
+
+
+
+def plot_first_last_word_boxes(image, word_boxes, filename):
+    plt.figure(figsize=(10, 10))
+    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    for i, (idx, box) in enumerate(word_boxes.items()):
+        if i < 3:
+            color = 'r'  # First three in red
+        elif i >= len(word_boxes) - 3:
+            color = 'b'  # Last three in blue
+        else:
+            continue
+        plt.gca().add_patch(plt.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor=color, facecolor='none'))
+    plt.axis('off')  # Hide axes
+    plt.savefig(filename)  # Save the plot to a file
+    plt.show()
+
+
+def plot_cropped_image(cropped_masked_image, filename):
+    plt.figure(figsize=(10, 10))
+    plt.imshow(cv2.cvtColor(cropped_masked_image, cv2.COLOR_BGR2RGB))
+    plt.axis('off')  # Hide axes
+    plt.savefig(filename)  # Save the plot to a file
+    plt.show()
+
 
 def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_parts=False):
     plots = False
@@ -276,6 +311,7 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         tessdata["left"][index] + tessdata["width"][index],
         tessdata["top"][index] + tessdata["height"][index]
     ) for index in indices_to_keep}
+    plot_all_word_boxes(image, word_boxes, "/home/fuchs/Desktop/dodis/tech_report_dataset/working_all_boxes.pdf")
 
     # TODO: Factor in one liner cases. Hoiw to?
     # Mayeb check if heights of all boxes are within 5 of eachother. then its one lines
@@ -287,6 +323,9 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
     word_boxes = {idx: box for idx, box in word_boxes.items() if (box[3] - box[1]) <= 1.7 * average_height}
     # remove boxes withe empty amtches
     word_boxes = {idx: box for idx, box in word_boxes.items() if tessdata["text"][idx] != ""}
+    plot_all_word_boxes(image,{}, "/home/fuchs/Desktop/dodis/tech_report_dataset/working.pdf")
+    plot_all_word_boxes(image, word_boxes, "/home/fuchs/Desktop/dodis/tech_report_dataset/working_all_boxes_cleaned.pdf")
+    plot_first_last_word_boxes(image, word_boxes, "/home/fuchs/Desktop/dodis/tech_report_dataset/working_first_last_boxes.pdf")
 
     # remove empty indices to keep
     indices_to_keep = [idx for idx in indices_to_keep if tessdata["text"][idx] != ""]
@@ -526,7 +565,7 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
         if fuzz_ratio < 75:
             del transcript_list[-1]
     # Add padding
-    padding = 2
+    padding = 0
     crop_x1 = 0
     # crop_x1 = max(0, crop_x1 - padding)
     crop_y1 = max(0, crop_y1 - 2 * padding)
@@ -536,7 +575,7 @@ def backcrop_image(image, indices_to_keep, tessdata, matched_text, take_out_part
 
     # Crop the image
     cropped_masked_image = masked_image[crop_y1:crop_y2, crop_x1:crop_x2]
-
+    plot_cropped_image(cropped_masked_image, "/home/fuchs/Desktop/dodis/tech_report_dataset/working_cropped_final.pdf")
     return cropped_masked_image, " ".join(transcript_list)
 
 
@@ -634,16 +673,22 @@ if __name__ == "__main__":
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/it/year_sorted/computer/"
     # pdf_path = "/home/fuchs/Desktop/dodis/dodo/docs_p1/sorted/en/computer/"
     txt_folder = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
-    output_folder = "/media/fuchs/d/dataset_try_6/parts/fr/"
-    # output_folder = "/media/fuchs/d/testi_output/"
-    log_file = f"{output_folder}creatino_de_log_3.txt"
+    # output_folder = "/media/fuchs/d/dataset_try_6/parts/fr/"
+    output_folder = "/media/fuchs/d/testi_output/"
+    log_file = f"{output_folder}creatino_de_log_testi.txt"
 
-    debug = False
+    debug = True
     dbeug_pdf_base = "/home/fuchs/Desktop/dodis/dodo/docs_p1/pdf/"
-    pdf_list = [23, 26, 3, 42968, 55703, 30751, 45823, 55703, 48366, 47372, 54174, 32700, 8303, 54813, 35754]
-    pdf_list = [45823, 55703, 48366, 47372, 54174, 32700, 8303, 54813, 35754]
-    pdf_list = [39653]
+    # pdf_list = [23, 26, 3, 42968, 55703, 30751, 45823, 55703, 48366, 47372, 54174, 32700, 8303, 54813, 35754]
+    # pdf_list = [45823, 55703, 48366, 47372, 54174, 32700, 8303, 54813, 35754]
+    # pdf_list = [39653]
     # pdf_list = [10156]
+    # pdf_list = [44532]
+    # pdf_list = [42847]
+    # pdf_list = [3]
+    # pdf_list = [39653]
+    # pdf_list = [54174]
+    pdf_list = [26]
     debug_txt_base = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
     debug_txt_fn = "/home/fuchs/Desktop/dodis/dodo/docs_p1/text_transcripts/"
 
